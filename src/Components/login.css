@@ -1,0 +1,252 @@
+@import url("https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css");
+
+/* Palette
+   Navy:   #16213E   (hover #1D2C50)
+   Gold:   #D4AF37 / #C9A227
+   Cream:  #FAF9F6
+   Text:   #2D2D2D
+*/
+
+.lp {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  background: #faf9f6;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #2d2d2d;
+  text-align: left;
+  box-sizing: border-box;
+}
+.lp *,
+.lp *::before,
+.lp *::after {
+  box-sizing: border-box;
+}
+
+.lp-card {
+  width: 420px;
+  max-width: 100%;
+  background: #fff;
+  border: 1px solid #e4e1d8;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(22, 33, 62, 0.1);
+}
+
+/* Header */
+.lp-header {
+  position: relative;
+  background: #16213e;
+  border-bottom: 3px solid #d4af37;
+  overflow: hidden;
+}
+.lp-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.4;
+}
+.lp-header-content {
+  position: relative;
+  z-index: 1;
+  padding: 1.75rem 2rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 4px;
+}
+.lp-mark {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: #d4af37;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+.lp-mark i {
+  font-size: 24px;
+  color: #16213e;
+}
+.lp-name {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  color: #faf9f6;
+}
+.lp-tag {
+  margin: 0;
+  font-size: 13px;
+  color: #d4af37;
+}
+
+/* Form */
+.lp-form {
+  padding: 1.75rem 2rem 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.lp-field label,
+.lp-label-row label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+.lp-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.lp-forgot {
+  font-size: 13px;
+  font-weight: 500;
+  color: #a98a14;
+  text-decoration: none;
+}
+.lp-forgot:hover {
+  text-decoration: underline;
+}
+
+.lp-input {
+  position: relative;
+}
+.lp-input input,
+.lp-input select {
+  width: 100%;
+  height: 42px;
+  padding: 0 40px 0 38px;
+  border: 1px solid #d8d5cb;
+  border-radius: 8px;
+  background: #faf9f6;
+  font-size: 14px;
+  font-family: inherit;
+  color: #2d2d2d;
+}
+.lp-input select {
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  font-weight: 500;
+}
+.lp-input input:focus,
+.lp-input select:focus {
+  outline: none;
+  border-color: #16213e;
+  box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.35);
+}
+.lp-lead {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 17px;
+  color: #9a9a9a;
+  pointer-events: none;
+}
+.lp-input select ~ .lp-chevron,
+.lp-chevron {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 16px;
+  color: #16213e;
+  pointer-events: none;
+}
+.lp-input:has(select) .lp-lead {
+  color: #c9a227;
+}
+.lp-eye {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  border: none;
+  background: transparent;
+  color: #9a9a9a;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.lp-eye i {
+  font-size: 17px;
+}
+.lp-eye:hover {
+  color: #16213e;
+}
+.lp-eye:focus-visible {
+  outline: 2px solid #d4af37;
+}
+
+.lp-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.lp-remember input {
+  flex: none;
+  margin: 0;
+  width: 15px;
+  height: 15px;
+  accent-color: #16213e;
+}
+
+.lp-error {
+  font-size: 13px;
+  color: #a32d2d;
+  background: #fbeeee;
+  border-left: 3px solid #a32d2d;
+  padding: 8px 10px;
+  border-radius: 4px;
+}
+
+.lp-submit {
+  height: 44px;
+  border: none;
+  border-radius: 8px;
+  background: #16213e;
+  color: #d4af37;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.lp-submit:hover {
+  background: #1d2c50;
+}
+.lp-submit:focus-visible {
+  outline: 2px solid #d4af37;
+  outline-offset: 2px;
+}
+
+.lp-secure {
+  margin: 4px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid #e4e1d8;
+  font-size: 12px;
+  color: #8a8a8a;
+  text-align: center;
+}
+.lp-secure i {
+  font-size: 14px;
+  vertical-align: -2px;
+  margin-right: 4px;
+  color: #c9a227;
+}
+
+@media (max-width: 440px) {
+  .lp-form {
+    padding: 1.5rem 1.25rem;
+  }
+}
