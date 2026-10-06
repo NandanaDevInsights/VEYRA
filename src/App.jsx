@@ -1,11 +1,11 @@
 import React from "react";
-import Login from "./Components/login";
+import Frontdashboard from "./Components/frontdashboard";
 import "./App.css";
 
 function App() {
   return (
     <div className="App">
-      <Login />
+      <Frontdashboard />
     </div>
   );
 }

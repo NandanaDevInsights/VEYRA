@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback } from "react";
-import Login from "./login";
+import Login from "./login.jsx";
 import "./homelogin.css";
 
 const slides = [
-  "https://images.unsplash.com/photo-1571896349842-33c89424de2d?w=1600&q=80",
+  "https://media.cntraveler.com/photos/59400502494db63f5b616059/16:9/w_2560%2Cc_limit/Suite1-GrandHotelduCapFerrat-France-CRHotel.jpg",
   "https://images.unsplash.com/photo-1611892440504-42a792e24d32?w=1600&q=80",
   "https://images.unsplash.com/photo-1582719508461-905c673771fd?w=1600&q=80",
   "https://images.unsplash.com/photo-1590490360182-c33d57733427?w=1600&q=80",
@@ -11,48 +11,59 @@ const slides = [
   "https://images.unsplash.com/photo-1584132967334-10e028bd69f7?w=1600&q=80",
 ];
 
-const departments = [
-  {
-    icon: "ti-door",
-    title: "Front desk",
-    desc: "Bookings, room allocation, and digital check-in passes.",
-  },
-  {
-    icon: "ti-sparkles",
-    title: "Housekeeping",
-    desc: "Real-time room status across every floor.",
-  },
-  {
-    icon: "ti-file-invoice",
-    title: "Billing",
-    desc: "Itemized invoices and organized payment records.",
-  },
+const stats = [
+  { icon: "ti-bed", value: "128", label: "Rooms managed" },
+  { icon: "ti-users", value: "42", label: "Staff accounts" },
+  { icon: "ti-building", value: "4", label: "Departments" },
+  { icon: "ti-chart-pie", value: "94%", label: "Current occupancy" },
 ];
 
-const stats = [
-  { icon: "ti-bed", value: "128", label: "ROOMS MANAGED" },
-  { icon: "ti-users", value: "42", label: "STAFF ACCOUNTS" },
-  { icon: "ti-building", value: "4", label: "DEPARTMENTS" },
-  { icon: "ti-chart-pie", value: "94%", label: "CURRENT OCCUPANCY" },
+const departments = [
+  { icon: "ti-door", title: "Front desk", desc: "Bookings, room allocation, and digital check-in passes." },
+  { icon: "ti-sparkles", title: "Housekeeping", desc: "Real-time room status across every floor." },
+  { icon: "ti-file-invoice", title: "Billing", desc: "Itemized invoices and organized payment records." },
+  { icon: "ti-settings", title: "Administration", desc: "Staff accounts, permissions, and property-wide reports." },
+];
+
+const journey = [
+  { icon: "ti-calendar-plus", title: "Booking", desc: "Guest details, preferences, and room type captured in one form." },
+  { icon: "ti-door-enter", title: "Check-in", desc: "Room allocated automatically, digital pass generated instantly." },
+  { icon: "ti-bed", title: "The stay", desc: "Housekeeping and service requests tracked in real time." },
+  { icon: "ti-receipt", title: "Check-out", desc: "Itemized billing settled and the room released for turnover." },
+];
+
+const benefits = [
+  { icon: "ti-shield-check", title: "Role-based access", desc: "Each team sees only what they need." },
+  { icon: "ti-clock-hour-4", title: "Faster front desk", desc: "Bookings and check-ins take minutes, not calls." },
+  { icon: "ti-database", title: "One source of truth", desc: "Guests, rooms, and billing stay in sync." },
+  { icon: "ti-chart-bar", title: "Reports on demand", desc: "Occupancy and revenue, searchable any time." },
 ];
 
 /**
  * HomeLoginAction
- * Same visual layout as HomeLogin, but every element on the page is
- * non-interactive EXCEPT the Login button. Clicking Login swaps the
- * home page out for the Login component directly (no routing needed).
+ * Same layout as HomeLogin, but every element is non-interactive
+ * EXCEPT the two "Staff login" buttons. Clicking either one swaps the
+ * home page for the Login component (login.jsx), with no routing needed.
  */
 export default function HomeLoginAction() {
   const [current, setCurrent] = useState(0);
   const [scrolled, setScrolled] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
 
-  // Carousel auto-rotates on its own — not user-triggered, so it stays active
+  // Carousel auto-rotates on its own, no manual controls
   useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrent((prev) => (prev + 1) % slides.length);
-    }, 4500);
-    return () => clearInterval(timer);
+    const t = setInterval(() => setCurrent((p) => (p + 1) % slides.length), 5500);
+    return () => clearInterval(t);
+  }, []);
+
+  // Always open at the top: stop the browser restoring the old scroll position
+  // and drop any #hash (e.g. #contact) left in the URL from earlier link clicks.
+  useEffect(() => {
+    if ("scrollRestoration" in window.history) window.history.scrollRestoration = "manual";
+    if (window.location.hash) {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+    window.scrollTo(0, 0);
   }, []);
 
   useEffect(() => {
@@ -62,157 +73,154 @@ export default function HomeLoginAction() {
   }, []);
 
   const handleLoginClick = useCallback(() => {
+    window.scrollTo(0, 0);
     setShowLogin(true);
   }, []);
 
-  // Once Login is triggered, render only the Login component
+  // Once Staff login is pressed, render only the Login component
   if (showLogin) {
     return <Login />;
   }
 
   return (
-    <div className="home-page" aria-disabled="true">
-      {/* Nav — brand is display-only, Login is the only active control */}
-      <nav className={`home-nav ${scrolled ? "home-nav--scrolled" : ""}`}>
-        <div className="brand" style={{ pointerEvents: "none" }}>
-          <div className="brand-badge">
-            <i className="ti ti-building-skyscraper" aria-hidden="true"></i>
-          </div>
-          <span className="brand-name">The Grandview Hotel</span>
+    <div className="hp hp--locked">
+      <nav className={`hp-nav ${scrolled ? "is-scrolled" : ""}`}>
+        <div className="hp-brand">
+          <span className="hp-badge"><i className="ti ti-building-skyscraper" aria-hidden="true"></i></span>
+          <span className="hp-brand-name">VEYRA</span>
         </div>
-        <button className="login-btn" onClick={handleLoginClick}>
-          LOGIN
-        </button>
+        <div className="hp-links">
+          <a tabIndex={-1} aria-disabled="true">Overview</a>
+          <a tabIndex={-1} aria-disabled="true">Departments</a>
+          <a tabIndex={-1} aria-disabled="true">Guest journey</a>
+          <a tabIndex={-1} aria-disabled="true">Contact</a>
+        </div>
+        <button type="button" className="hp-btn hp-btn--gold hp-allow" onClick={handleLoginClick}>Staff login</button>
       </nav>
 
-      {/* Carousel — auto-plays only, no manual controls */}
-      <div className="carousel" style={{ pointerEvents: "none" }}>
-        <div
-          className="carousel-track"
-          style={{
-            width: `${slides.length * 100}%`,
-            transform: `translateX(-${current * (100 / slides.length)}%)`,
-          }}
-        >
+      <header className="hp-hero" id="top">
+        <div>
           {slides.map((src, i) => (
             <div
               key={i}
-              className="carousel-slide"
-              style={{
-                width: `${100 / slides.length}%`,
-                backgroundImage: `url(${src})`,
-              }}
+              className={`hp-slide ${i === current ? "is-active" : ""}`}
+              style={{ backgroundImage: `url(${src})` }}
             ></div>
           ))}
         </div>
+        <div className="hp-hero-shade"></div>
 
-        <div className="carousel-caption">
-          <span className="eyebrow">STAFF PORTAL</span>
-          <h1>
-            Every stay,
-            <br />
-            <em>precisely</em> managed.
-          </h1>
-          <p className="carousel-subtitle">
-            One system for bookings, rooms, and service — from arrival to
-            departure.
-          </p>
+        <div className="hp-caption">
+          <h1>Every stay, precisely managed.</h1>
+          <p>One system for bookings, rooms, and service, from arrival to departure.</p>
+          <div className="hp-cta">
+            <button type="button" className="hp-btn hp-btn--gold hp-btn--lg hp-allow" onClick={handleLoginClick}>Staff login</button>
+            <a tabIndex={-1} aria-disabled="true" className="hp-btn hp-btn--ghost hp-btn--lg">See how it works</a>
+          </div>
         </div>
 
-        {/* Dots are visual indicators only — not clickable */}
-        <div className="carousel-dots">
-          {slides.map((_, i) => (
-            <span
-              key={i}
-              className={`dot ${i === current ? "active" : ""}`}
-              style={{ cursor: "default" }}
-            ></span>
-          ))}
+        {/* Dots are visual indicators only */}
+        <div className="hp-controls">
+          <div className="hp-dots">
+            {slides.map((_, i) => (
+              <button
+                key={i}
+                tabIndex={-1}
+                aria-hidden="true"
+                className={i === current ? "is-active" : ""}
+              ></button>
+            ))}
+          </div>
         </div>
+      </header>
 
-        <div className="scroll-hint">
-          <i className="ti ti-chevron-down" aria-hidden="true"></i>
-        </div>
-      </div>
+      <section className="hp-stats" id="overview">
+        {stats.map((s) => (
+          <div className="hp-stat" key={s.label}>
+            <i className={`ti ${s.icon}`} aria-hidden="true"></i>
+            <div>
+              <p className="hp-stat-value">{s.value}</p>
+              <p className="hp-stat-label">{s.label}</p>
+            </div>
+          </div>
+        ))}
+      </section>
 
-      {/* Section 1 — System overview stats (display only) */}
-      <section className="stats-section" style={{ pointerEvents: "none" }}>
-        <div className="section-inner">
-          <p className="section-label">SYSTEM OVERVIEW</p>
-          <h2 className="section-heading">
-            Everything the front of house needs, in one place.
-          </h2>
-
-          <div className="stats-row">
-            {stats.map((stat, i) => (
-              <div className="stat" key={i}>
-                <i className={`ti ${stat.icon} stat-icon`} aria-hidden="true"></i>
-                <p className="stat-value">{stat.value}</p>
-                <p className="stat-label">{stat.label}</p>
+      <section className="hp-section" id="departments">
+        <div className="hp-inner">
+          <h2 className="hp-h2">One platform, four teams, zero paperwork.</h2>
+          <p className="hp-lede">Every department works from the same live record, with its own tools and permissions.</p>
+          <div className="hp-dept-grid">
+            {departments.map((d) => (
+              <div className="hp-dept" key={d.title}>
+                <span className="hp-dept-icon"><i className={`ti ${d.icon}`} aria-hidden="true"></i></span>
+                <h3>{d.title}</h3>
+                <p>{d.desc}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Section 2 — Departments (display only) */}
-      <section className="departments-section" style={{ pointerEvents: "none" }}>
-        <div className="section-inner">
-          <p className="section-label">BUILT FOR EVERY DEPARTMENT</p>
-          <h2 className="section-heading">
-            One platform, four teams, zero paperwork.
-          </h2>
-
-          <div className="dept-grid">
-            {departments.map((dept, i) => (
-              <div className="dept-card" key={i}>
-                <i className={`ti ${dept.icon}`} aria-hidden="true"></i>
-                <p className="dept-title">{dept.title}</p>
-                <p className="dept-desc">{dept.desc}</p>
-              </div>
+      <section className="hp-journey" id="journey">
+        <div className="hp-inner">
+          <h2 className="hp-h2 hp-h2--light">The guest journey, end to end.</h2>
+          <p className="hp-lede hp-lede--light">Four stages, one connected record.</p>
+          <ol className="hp-steps">
+            {journey.map((s, i) => (
+              <li key={s.title}>
+                <span className="hp-step-icon"><i className={`ti ${s.icon}`} aria-hidden="true"></i></span>
+                <span className="hp-step-num">Step {i + 1}</span>
+                <h3>{s.title}</h3>
+                <p>{s.desc}</p>
+              </li>
             ))}
+          </ol>
+        </div>
+      </section>
+
+      <section className="hp-section hp-why">
+        <div className="hp-inner hp-why-grid">
+          <div className="hp-why-media">
+            <img src={slides[2]} alt="Hotel lobby" />
+          </div>
+          <div>
+            <h2 className="hp-h2 hp-h2--left">Built to make every shift easier.</h2>
+            <div className="hp-benefits">
+              {benefits.map((b) => (
+                <div className="hp-benefit" key={b.title}>
+                  <span className="hp-benefit-icon"><i className={`ti ${b.icon}`} aria-hidden="true"></i></span>
+                  <div>
+                    <h3>{b.title}</h3>
+                    <p>{b.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>
 
-      {/* Footer — informational only, no clickable links */}
-      <footer className="home-footer" style={{ pointerEvents: "none" }}>
-        <div className="footer-grid">
+      <footer className="hp-footer" id="contact">
+        <div className="hp-footer-grid">
           <div>
-            <span className="footer-brand">The Grandview Hotel</span>
-            <p className="footer-about">
-              Internal staff system for front desk, housekeeping, billing,
-              and administration.
-            </p>
+            <span className="hp-footer-brand">VEYRA</span>
+            <p className="hp-footer-about">Internal staff system for front desk, housekeeping, billing, and administration.</p>
           </div>
-
           <div>
-            <p className="footer-heading">CONTACT</p>
-            <p className="footer-line">
-              <i className="ti ti-phone" aria-hidden="true"></i>
-              +91 484 220 1145
-            </p>
-            <p className="footer-line">
-              <i className="ti ti-mail" aria-hidden="true"></i>
-              frontdesk@grandview.com
-            </p>
-            <p className="footer-line">
-              <i className="ti ti-map-pin" aria-hidden="true"></i>
-              Kozhikode, Kerala
-            </p>
+            <p className="hp-footer-head">Contact</p>
+            <p><i className="ti ti-phone" aria-hidden="true"></i>+91 484 220 1145</p>
+            <p><i className="ti ti-mail" aria-hidden="true"></i>frontdesk@veyra.com</p>
+            <p><i className="ti ti-map-pin" aria-hidden="true"></i>Kozhikode, Kerala</p>
           </div>
-
           <div>
-            <p className="footer-heading">SUPPORT</p>
-            <p className="footer-line">IT Helpdesk</p>
-            <p className="footer-line">Staff Handbook</p>
-            <p className="footer-line">Report an Issue</p>
+            <p className="hp-footer-head">Support</p>
+            <p>IT Helpdesk</p>
+            <p>Staff Handbook</p>
+            <p>Report an Issue</p>
           </div>
         </div>
-
-        <div className="footer-bottom">
-          <p>Internal use only &middot; The Grandview Hotel</p>
-        </div>
+        <div className="hp-footer-bottom">Internal use only &middot; VEYRA</div>
       </footer>
     </div>
   );

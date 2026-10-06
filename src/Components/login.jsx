@@ -34,7 +34,8 @@ function HotelArt() {
   );
 }
 
-export default function LoginPage() {
+// onLogin is provided by LoginAction.jsx
+export default function LoginPage({ onLogin }) {
   const [role, setRole] = useState("Front desk");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -51,8 +52,11 @@ export default function LoginPage() {
       return;
     }
     setError(false);
-    // TODO: replace with real authentication call
-    console.log("Signing in:", { username, role, remember });
+
+    // TODO: replace with real authentication call, then call onLogin on success
+    if (onLogin) {
+      onLogin({ role, username: username.trim(), remember });
+    }
   };
 
   return (
