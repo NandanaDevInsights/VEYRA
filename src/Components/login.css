@@ -60,14 +60,16 @@
   gap: 4px;
 }
 .lp-mark {
-  width: 46px;
-  height: 46px;
-  border-radius: 50%;
-  background: #d4af37;
   display: flex;
   align-items: center;
   justify-content: center;
   margin-bottom: 6px;
+  background: transparent;
+}
+.lp-logo-img {
+  height: 54px;
+  width: auto;
+  object-fit: contain;
 }
 .lp-mark i {
   font-size: 24px;
@@ -243,6 +245,64 @@
   vertical-align: -2px;
   margin-right: 4px;
   color: #c9a227;
+}
+
+.lp-tabs {
+  display: flex;
+  background: #f0ede4;
+  border-radius: 8px;
+  padding: 4px;
+  gap: 4px;
+}
+.lp-tab {
+  flex: 1;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: #555;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+.lp-tab.active {
+  background: #fff;
+  color: #16213e;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.lp-tab:hover:not(.active) {
+  color: #16213e;
+}
+.lp-tab:focus-visible {
+  outline: 2px solid #d4af37;
+}
+
+.lp-switch-text {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #555;
+  text-align: center;
+}
+.lp-link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #a98a14;
+  cursor: pointer;
+  text-decoration: underline;
+  font-family: inherit;
+}
+.lp-link-btn:hover {
+  color: #16213e;
+}
+
+.lp-submit:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 
 @media (max-width: 440px) {

@@ -44,6 +44,7 @@ html { scroll-behavior: smooth; }
 }
 .hp-nav.is-scrolled { background: rgba(22,33,62,.95); padding: .9rem 4vw; box-shadow: 0 4px 20px rgba(0,0,0,.15); backdrop-filter: blur(6px); }
 .hp-brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+.hp-logo-img { height: 42px; width: auto; object-fit: contain; }
 .hp-badge { width: 40px; height: 40px; border-radius: 50%; background: var(--gold); display: flex; align-items: center; justify-content: center; }
 .hp-badge i { font-size: 21px; color: var(--navy); }
 .hp-brand-name { font-family: var(--serif); font-size: 28px; font-weight: 600; color: #fff; letter-spacing: .3px; }
@@ -149,6 +150,8 @@ html { scroll-behavior: smooth; }
 /* Footer */
 .hp-footer { background: #101a31; padding: 3.5rem 2rem 1.75rem; color: #dad7ce; }
 .hp-footer-grid { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 40px; }
+.hp-footer-brand-wrap { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.hp-footer-logo-img { height: 36px; width: auto; object-fit: contain; }
 .hp-footer-brand { font-family: var(--serif); font-size: 28px; font-weight: 600; color: #fff; }
 .hp-footer-about { font-size: 14px; color: #a9a6a0; line-height: 1.7; margin-top: 10px; max-width: 280px; }
 .hp-footer-head { font-size: 14px; font-weight: 600; color: var(--gold); margin-bottom: 14px; }

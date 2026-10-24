@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import "./Billingdashboard.css";
+import { billingApi } from "../api.js";
 
 /* ---------- helpers ---------- */
 const iso = (n = 0) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toLocaleDateString("en-CA"); };
@@ -71,8 +72,8 @@ const BELL = "M6 9a6 6 0 0112 0c0 6 3 7 3 7H3s3-1 3-7M10 20a2 2 0 004 0";
 const S = {
   grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(310px,1fr))", gap: 14 },
   card: { background: "#fff", border: "1px solid #e6e1d6", borderRadius: 14, padding: 16, display: "grid", gap: 8 },
-  dd: { position: "absolute", right: 0, top: "115%", background: "#fff", color: "#1a2347", border: "1px solid #e6e1d6", borderRadius: 12, padding: 6, display: "grid", minWidth: 200, zIndex: 40, boxShadow: "0 10px 28px -12px rgba(0,0,0,.35)" },
-  ddi: { background: "none", border: 0, textAlign: "left", padding: "10px 12px", borderRadius: 8, cursor: "pointer", font: "inherit", color: "inherit" },
+  dd: { position: "absolute", right: 0, top: "115%", background: "#FFFFFF", color: "#1B2A4A", border: "1px solid #E7E3D8", borderRadius: 12, padding: "8px", display: "grid", minWidth: 220, zIndex: 50, boxShadow: "0 10px 30px rgba(27,42,74,0.18)" },
+  ddi: { background: "none", border: 0, textAlign: "left", padding: "10px 12px", borderRadius: 8, cursor: "pointer", font: "inherit", color: "#1B2A4A", fontWeight: 600, fontSize: "13.5px", width: "100%", display: "block" },
   box: { background: "#fff", borderRadius: 16, padding: 24, width: "min(420px,92vw)", display: "grid", gap: 14 },
   acts: { display: "flex", flexWrap: "wrap", gap: 6 }, toast: { position: "fixed", right: 20, bottom: 20, display: "grid", gap: 8, zIndex: 99 },
   two: { display: "flex", gap: 8 }, sel: { cursor: "pointer" },
@@ -248,16 +249,117 @@ function BillModal({ bill, admin, onClose, onPay, onVerify, onFail, onSend, onEd
 }
 
 /* ---------- main ---------- */
-function Billing({ onLogout }) {
+function Billing({ onLogout, username }) {
   const [view, setView] = useState("overview"), [guests, setGuests] = useState(GUESTS0), [bills, setBills] = useState(BILLS0), [refunds, setRefunds] = useState(REF0);
   const [hk, setHk] = useState([]), [notes, setNotes] = useState(NOTE0), [audits, setAudits] = useState([]);
   const [acts, setActs] = useState([["Invoice INV-1041 created", "Rohit Kurian · Room 203", "Meera Nair", "09:02", "Done"], ["Payment received from Room 205", "Divya Menon", "Meera Nair", "09:25", "Done"], ["New checkout billing request received", "Room 106", "Front desk", "08:40", "New"]]);
   const [startId, setStartId] = useState(""), [openNo, setOpenNo] = useState(null), [clock, setClock] = useState(new Date()), [q, setQ] = useState("");
   const [flt, setFlt] = useState({ status: "all", from: "", to: "", room: "", sort: "new" }), [hp, setHp] = useState(0), [day, setDay] = useState(iso()), [rv, setRv] = useState({ mode: "all", cat: "all", range: 7 });
   const [pf, setPf] = useState({ when: "all", room: "", guest: "", status: "all", sort: "checkout" }), [py, setPy] = useState({ status: "all", mode: "all" });
-  const [loading, setLoading] = useState(true), [toasts, setToasts] = useState([]), [menu, setMenu] = useState(false), [dlg, setDlg] = useState(null), [me, setMe] = useState(ME0), [ptab, setPtab] = useState("view");
+  const initialMe = () => {
+    if (!username) return ME0;
+    const name = username.includes("@")
+      ? username.split("@")[0].replace(/[._]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+      : username;
+    return { ...ME0, name, email: username.includes("@") ? username : ME0.email };
+  };
+  const [loading, setLoading] = useState(true), [toasts, setToasts] = useState([]), [menu, setMenu] = useState(false), [dlg, setDlg] = useState(null), [me, setMe] = useState(initialMe), [ptab, setPtab] = useState("view");
   const [prefs, setPrefs] = useState({}), [sys, setSys] = useState({ admin: false, auto: true }), [edit, setEdit] = useState({}), [acct, setAcct] = useState(""), [rep, setRep] = useState({ key: "billing", from: "", to: "" });
   const [cf, setCf] = useState({ cat: "Food", desc: "", amt: "" }), [rf, setRf] = useState({ no: "", amt: "", reason: "" });
+
+  const refreshData = useCallback(async () => {
+    try {
+      const [ovRes, ntbRes, invRes, refRes, revRes, gRes, actRes] = await Promise.allSettled([
+        billingApi.getOverview(),
+        billingApi.getNextToBill(),
+        billingApi.getInvoices(),
+        billingApi.getRefunds(),
+        billingApi.getRevenue(),
+        billingApi.getGuests(),
+        billingApi.getActivity(),
+      ]);
+
+      if (ntbRes.status === "fulfilled" && ntbRes.value?.success && ntbRes.value.list?.length) {
+        const mappedGuests = ntbRes.value.list.map((item, idx) => ({
+          id: `g_${item.guest_id}_${item.booking_id || idx}`,
+          guest_id: item.guest_id,
+          booking_id: item.booking_id,
+          guest: item.guest_name,
+          phone: item.phone || "98470 00000",
+          bk: item.booking_code || `BK-200${idx}`,
+          room: Number(item.room_number) || 101,
+          type: item.room_type || "Single",
+          rate: Number(item.rate_per_night) || 2500,
+          inD: -2,
+          outD: 0,
+          stage: item.invoice_id ? "billed" : "checkout",
+          extras: [],
+        }));
+        setGuests(mappedGuests);
+      }
+
+      if (invRes.status === "fulfilled" && invRes.value?.success && invRes.value.invoices?.length) {
+        const mappedBills = invRes.value.invoices.map((inv) => {
+          const invNum = parseInt(String(inv.invoice_number).replace(/\D/g, ""), 10) || inv.id;
+          return {
+            no: invNum,
+            db_id: inv.id,
+            guest: inv.guest_name,
+            phone: inv.guest_phone || "98470 00000",
+            room: Number(inv.room_number) || 101,
+            bk: inv.booking_code || `BK-${invNum}`,
+            date: String(inv.created_at).slice(0, 10),
+            due: String(inv.created_at).slice(0, 10),
+            lines: [{ cat: "Room", desc: `Room ${inv.room_number || 101} Stay`, qty: 1, rate: Number(inv.subtotal), amt: Number(inv.subtotal) }],
+            svc: 5,
+            taxPct: 12,
+            disc: { type: "₹", val: 0 },
+            subtotal: Number(inv.subtotal),
+            service: 0,
+            discount: 0,
+            fee: 0,
+            tax: Number(inv.tax_total),
+            total: Number(inv.grand_total),
+            by: "Staff",
+            payments: Number(inv.amount_paid) > 0 ? [{ id: `PAY-${inv.id}`, mode: "Cash", amt: Number(inv.amount_paid), ref: "Direct", date: String(inv.created_at).slice(0, 10), time: "10:00", by: "Staff", status: "Paid" }] : [],
+          };
+        });
+        setBills(mappedBills);
+      }
+
+      if (refRes.status === "fulfilled" && refRes.value?.success && refRes.value.refunds?.length) {
+        setRefunds(refRes.value.refunds.map((r) => ({
+          id: `RF-${r.id}`,
+          no: r.invoice_id || 1001,
+          guest: "Guest",
+          amt: Number(r.amount),
+          reason: r.reason,
+          mode: "Card",
+          by: r.requested_by || "Staff",
+          appr: r.approved_by || "",
+          date: String(r.created_at).slice(0, 10),
+          status: r.status.charAt(0).toUpperCase() + r.status.slice(1),
+        })));
+      }
+
+      if (actRes.status === "fulfilled" && actRes.value?.success && actRes.value.activity?.length) {
+        setActs(actRes.value.activity.map((a) => [
+          a.action,
+          a.description || a.action,
+          a.staff || "Staff",
+          String(a.at).slice(11, 16),
+          "Done",
+        ]));
+      }
+    } catch (err) {
+      console.warn("Billing fetch error:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshData();
+  }, [refreshData]);
+
   useEffect(() => { const t = setInterval(() => setClock(new Date()), 30000), l = setTimeout(() => setLoading(false), 500); return () => { clearInterval(t); clearTimeout(l); }; }, []);
   if (loading) return <div className="bd"><p className="empty" style={{ padding: 60 }}>Loading billing data…</p></div>;
 
@@ -280,8 +382,23 @@ function Billing({ onLogout }) {
 
   /* ----- workflow actions ----- */
   const startBill = (id) => { setStartId(id); setView("create"); };
-  const generate = (g, data) => {
-    const no = Math.max(...bills.map((b) => b.no)) + 1;
+  const generate = async (g, data) => {
+    try {
+      await billingApi.createInvoice({
+        booking_id: g.booking_id,
+        guest_id: g.guest_id || 1,
+        items: (data.lines || []).map((l) => ({
+          item_type: (l.cat || "").toLowerCase() === "room" ? "room" : "service",
+          description: l.desc || l.cat || "Charge",
+          quantity: l.qty || 1,
+          unit_price: l.rate || l.amt || 0,
+        })),
+      });
+      await refreshData();
+    } catch (err) {
+      console.warn("Backend create invoice error:", err);
+    }
+    const no = Math.max(...bills.map((b) => b.no), 1000) + 1;
     setBills([{ no, gid: g.id, guest: g.guest, phone: g.phone, room: g.room, bk: g.bk, date: iso(), due: iso(g.outD === 0 ? 0 : 2), by: me.name, payments: [], ...data }, ...bills]);
     setGuests(guests.map((x) => (x.id === g.id ? { ...x, stage: "billed" } : x)));
     audit("Bill created", `INV-${no}`, "-", inr(data.total)); if (data.discount > 0) audit("Discount added", `INV-${no}`, "₹0", inr(data.discount));
@@ -306,12 +423,25 @@ function Billing({ onLogout }) {
     audit("Invoice settled", `INV-${b.no}`, "Unsettled", "Paid"); act(`Invoice INV-${b.no} settled`, `${b.guest} · Room ${b.room}`); note("Payment", `Payment received: INV-${b.no} settled. Front desk notified.`); toast("Payment successful. Receipt generated.");
     const g = guests.find((x) => x.id === b.gid); if (sys.auto) completeCheckout(g);
   };
-  const recordPay = (no, { mode, amt, ref }) => {
-    const b = bills.find((x) => x.no === no), status = mode === "Cash" ? "Paid" : "Processing";
+  const recordPay = async (no, { mode, amt, ref }) => {
+    const b = bills.find((x) => x.no === no);
+    try {
+      if (b?.db_id) {
+        await billingApi.addPayment({
+          invoice_id: b.db_id,
+          amount: amt,
+          method: (mode || "Cash").toLowerCase().replace(/\s+/g, "_"),
+        });
+        await refreshData();
+      }
+    } catch (err) {
+      console.warn("Backend payment error:", err);
+    }
+    const status = mode === "Cash" ? "Paid" : "Processing";
     const p = { id: `PAY-${6000 + allPays.length}`, mode, amt, ref: ref || (mode === "Cash" ? "-" : `TXN${Date.now() % 1e8}`), date: iso(), time: clock.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }), by: me.name, status };
     const nb = bills.map((x) => (x.no === no ? { ...x, payments: [...x.payments, p] } : x)); setBills(nb);
-    audit("Payment recorded", `INV-${no}`, inr(paidOf(b)), inr(paidOf(b) + (status === "Paid" ? amt : 0)));
-    act(`Payment ${status === "Paid" ? "received" : "submitted"} ${inr(amt)}`, `${b.guest} · Room ${b.room}`, status);
+    audit("Payment recorded", `INV-${no}`, inr(paidOf(b || {})), inr(paidOf(b || {}) + (status === "Paid" ? amt : 0)));
+    act(`Payment ${status === "Paid" ? "received" : "submitted"} ${inr(amt)}`, `${b ? b.guest : "Guest"} · Room ${b ? b.room : ""}`, status);
     status === "Paid" ? afterPaid(nb.find((x) => x.no === no)) : (note("Verification", `Payment verification required: ${p.id}`), toast("Payment recorded. Verify it to settle the bill."));
   };
   const setPay = (no, pid, status) => {
@@ -409,28 +539,38 @@ function Billing({ onLogout }) {
   return (
     <div className="bd">
       <header className="top">
-        <div className="brand"><span className="logo"><Icon d="M7 14a3 3 0 100-6 3 3 0 000 6zM10 11h10M17 11v3M20 11v2" /></span><div><h1>{HOTEL.name}</h1><small>Billing Desk Dashboard</small></div></div>
+        <div className="brand"><img src="/logo.png" alt="VEYRA Logo" className="bd-logo-img" /><div><h1>{HOTEL.name}</h1><small>Billing Desk Dashboard</small></div></div>
         <input className="search" type="search" aria-label="Search" placeholder="Search guest, phone, booking, room, invoice, payment ID" value={q} onChange={(e) => { setQ(e.target.value); setHp(0); setView("history"); }} />
         <button className="btn-outline" onClick={() => go("create")}>+ New Bill</button>
         <div className="clock"><span>{dateLabel}</span><b>{timeLabel}</b></div>
         <button className="bell" onClick={() => go("notifications")} aria-label={`${unread} unread notifications`}><Icon d={BELL} />{unread > 0 && <em>{unread}</em>}</button>
         <div style={{ position: "relative" }}>
-          <button className="user" style={{ cursor: "pointer", background: "none", border: 0, font: "inherit", color: "inherit" }} onClick={() => setMenu(!menu)} aria-haspopup="menu" aria-expanded={menu}><span className="avatar"><Icon d={NAV[7][2]} /></span><span><b>{me.name}</b><small className="block">{me.role}</small></span></button>
+          <button className="user" style={{ cursor: "pointer", background: "none", border: 0, font: "inherit", color: "inherit" }} onClick={() => setMenu(!menu)} aria-haspopup="menu" aria-expanded={menu}><span className="avatar"><Icon d={NAV[7][2]} /></span><span><b>{me.name}</b><small className="block" style={{ color: "var(--gold-light)" }}>{me.role}</small></span></button>
           {menu && (<><div style={{ position: "fixed", inset: 0, zIndex: 30 }} onClick={() => setMenu(false)} />
             <div style={S.dd} role="menu">
+              <div style={{ padding: "8px 12px 10px", borderBottom: "1px solid var(--line)", marginBottom: 4 }}>
+                <b style={{ color: "var(--navy)", display: "block", fontSize: "14px" }}>{me.name}</b>
+                <small style={{ color: "var(--muted)", fontSize: "12px" }}>{me.role}</small>
+              </div>
               {[["View Profile", "view"], ["Edit Profile", "edit"]].map(([l, t]) => <button key={t} className="ddi" style={S.ddi} role="menuitem" onClick={() => go("profile", () => setPtab(t))}>{l}</button>)}
-              <button className="ddi" style={S.ddi} role="menuitem" onClick={() => go("settings")}>Settings</button></div></>)}
+              <button className="ddi" style={S.ddi} role="menuitem" onClick={() => go("settings")}>Settings</button>
+              <button className="ddi" style={{ ...S.ddi, color: "var(--red)", borderTop: "1px solid var(--line)", marginTop: 4, display: "flex", alignItems: "center", gap: 6 }} role="menuitem" onClick={() => { setMenu(false); if (onLogout) onLogout(); }}>Log out</button>
+            </div></>)}
         </div>
       </header>
 
       <div className="body">
-        <aside className="side"><nav aria-label="Billing sections">
+        <aside className="side"><nav aria-label="Billing sections" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
           {NAV.map(([k, l, d]) => (
             <button key={k} className={`nav ${view === k ? "is-on" : ""}`} onClick={() => go(k)} aria-current={view === k ? "page" : undefined}>
               <Icon d={d} /><span>{l}</span>
               {k === "pending" && awaiting.length + unsettled.length > 0 && <em className="badge">{awaiting.length + unsettled.length}</em>}
               {k === "refunds" && refunds.filter((r) => r.status === "Pending Approval").length > 0 && <em className="badge">{refunds.filter((r) => r.status === "Pending Approval").length}</em>}
             </button>))}
+          <button className="nav logout" onClick={() => { if (onLogout) onLogout(); }} style={{ marginTop: "auto", color: "var(--red)", borderTop: "1px solid var(--line)", borderRadius: 8, paddingTop: 12 }}>
+            <Icon d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3 M16 15l4-4-4-4 M20 11H9" />
+            <span>Log out</span>
+          </button>
         </nav></aside>
 
         <main className={`page v-${view}`}>
@@ -587,7 +727,7 @@ function Billing({ onLogout }) {
 
       {dlg && (
         <div className="overlay" onClick={() => setDlg(null)}><div style={S.box} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-          {dlg.t === "logout" && (<><h3>Are you sure you want to logout?</h3><div style={S.two}><button className="btn-line" onClick={() => setDlg(null)}>Cancel</button><button className="btn-navy" onClick={onLogout}>Logout</button></div></>)}
+          {dlg.t === "logout" && (<><h3>Are you sure you want to logout?</h3><div style={S.two}><button className="btn-line" onClick={() => setDlg(null)}>Cancel</button><button className="btn-navy" onClick={() => { setDlg(null); if (onLogout) onLogout(); }}>Logout</button></div></>)}
           {dlg.t === "charge" && (<><h3>Add charge · Room {dlg.g.room}</h3><label className="fld">Category<select value={cf.cat} onChange={(e) => setCf({ ...cf, cat: e.target.value })}>{CATS.map((c) => <option key={c}>{c}</option>)}</select></label>
             <label className="fld">Description<input value={cf.desc} onChange={(e) => setCf({ ...cf, desc: e.target.value })} /></label><label className="fld">Amount ₹<input type="number" min="0" value={cf.amt} onChange={(e) => setCf({ ...cf, amt: e.target.value })} /></label>
             <small className="muted">Recorded for {dlg.g.guest} · {dlg.g.bk} · by {me.name}</small><div style={S.two}><button className="btn-line" onClick={() => setDlg(null)}>Cancel</button><button className="btn-navy" onClick={() => addCharge(dlg.g)}>Add charge</button></div></>)}
@@ -607,7 +747,7 @@ function PassForm({ pw, onSave }) {
     {m && <p style={{ color: "#a12b24", margin: 0 }}>{m}</p>}<button className="btn-navy" onClick={save}>Change password</button></div>);
 }
 
-export default function BillingDashboard() {
+export default function BillingDashboard({ onLogout, username }) {
   const [auth, setAuth] = useState(true);
-  return auth ? <Billing onLogout={() => setAuth(false)} /> : <Login onLogin={() => setAuth(true)} />;
+  return auth ? <Billing onLogout={onLogout} username={username} /> : <Login onLogin={() => setAuth(true)} />;
 }

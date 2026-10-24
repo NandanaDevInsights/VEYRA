@@ -1,25 +1,167 @@
-import React, { useState } from "react";
+import { useState } from "react";
+import HomeLogin from "./homelogin.jsx";
 import Login from "./login.jsx";
 import Admindashboard from "./Admindashboard.jsx";
 import Billingdashboard from "./Billingdashboard.jsx";
 import Frontdashboard from "./frontdashboard.jsx";
 import Housekeepingdashboard from "./Housekeepingdashboard.jsx";
+import { authApi } from "../api.js";
 
-// Keys match the names in the Role dropdown on the login page
+// Role names supported by the system
+const ROLES = ["Admin", "Billing", "Front Desk", "Housekeeping"];
+
+// Normalizes any role variation to canonical role name
+function normalizeRole(role) {
+  if (!role) return "Front Desk";
+  const r = String(role).trim().toLowerCase();
+  if (r === "admin" || r === "administrator") return "Admin";
+  if (r === "front desk" || r === "frontdesk" || r === "front") return "Front Desk";
+  if (r === "billing") return "Billing";
+  if (r === "housekeeping") return "Housekeeping";
+  return role;
+}
+
+// Maps each role to the dashboard component it redirects to after login
 const DASHBOARDS = {
-  "Front desk": Frontdashboard,
-  "Housekeeping": Housekeepingdashboard,
-  "Billing": Billingdashboard,
+  "Admin": Admindashboard,
   "Administrator": Admindashboard,
+  "Billing": Billingdashboard,
+  "Front Desk": Frontdashboard,
+  "Front desk": Frontdashboard,
+  "frontdesk": Frontdashboard,
+  "Housekeeping": Housekeepingdashboard,
 };
 
-export default function LoginAction() {
-  const [role, setRole] = useState(null);
+// Hook containing all login flow state & handlers
+export function useLoginAction() {
+  const [page, setPage] = useState("home"); // "home" | "login" | "dashboard"
+  const [role, setRole] = useState("Front Desk");
+  const [username, setUsername] = useState("");
+  const [currentUser, setCurrentUser] = useState(null);
+  const [error, setError] = useState("");
 
-  if (role) {
-    const Dashboard = DASHBOARDS[role];
-    return <Dashboard role={role} onLogout={() => setRole(null)} />;
+  // Role selection handling & navigation from home to login
+  const goToLogin = (selectedRole) => {
+    const targetRole = selectedRole ? normalizeRole(selectedRole) : "Front Desk";
+    setRole(targetRole);
+    setError("");
+    setPage("login");
+  };
+
+  // Authenticate against real MySQL database with bcrypt hash and role verification
+  const login = async ({ role: chosenRole, username: enteredUser, password, remember }) => {
+    const currentRole = chosenRole ? normalizeRole(chosenRole) : role;
+
+    if (!enteredUser || !password) {
+      setError("Enter both your username and password.");
+      return false;
+    }
+
+    try {
+      const res = await authApi.login({
+        role: currentRole,
+        username: enteredUser,
+        password,
+        keepSigned: remember,
+      });
+
+      if (res.success && res.token) {
+        localStorage.setItem("veyra_token", res.token);
+        localStorage.setItem("veyra_user", JSON.stringify(res.user));
+        setCurrentUser(res.user);
+        setRole(res.user.role || currentRole);
+        setUsername(res.user.full_name || res.user.username);
+        setError("");
+        setPage("dashboard");
+        return true;
+      } else {
+        setError(res.error || "Login failed.");
+        return false;
+      }
+    } catch (err) {
+      setError(err.message || "Invalid username or password.");
+      return false;
+    }
+  };
+
+  // Register new staff account into users and roles tables in database
+  const register = async ({ role: chosenRole, full_name, username: enteredUser, email, password }) => {
+    const currentRole = chosenRole ? normalizeRole(chosenRole) : role;
+    try {
+      const res = await authApi.register({
+        role: currentRole,
+        full_name,
+        username: enteredUser,
+        email,
+        password,
+      });
+
+      if (res.success && res.token) {
+        localStorage.setItem("veyra_token", res.token);
+        localStorage.setItem("veyra_user", JSON.stringify(res.user));
+        setCurrentUser(res.user);
+        setRole(res.user.role || currentRole);
+        setUsername(res.user.full_name || res.user.username);
+        setError("");
+        setPage("dashboard");
+        return { success: true };
+      }
+      return { success: false, error: res.error || "Registration failed." };
+    } catch (err) {
+      return { success: false, error: err.message || "Registration failed." };
+    }
+  };
+
+  // Taking user back to the login page when logging out from any dashboard
+  const logout = async () => {
+    try {
+      await authApi.logout();
+    } catch {
+      // ignore
+    }
+    localStorage.removeItem("veyra_token");
+    localStorage.removeItem("veyra_user");
+    setCurrentUser(null);
+    setError("");
+    setPage("login");
+  };
+
+  return {
+    page,
+    role,
+    username,
+    currentUser,
+    error,
+    goToLogin,
+    login,
+    register,
+    logout,
+    setPage,
+  };
+}
+
+// Chooses which screen to render based on the current login flow state.
+// Home page (homelogin.jsx) is the first screen shown when the app starts.
+export default function LoginAction() {
+  const { page, role, username, currentUser, error, goToLogin, login, register, logout } = useLoginAction();
+
+  if (page === "login") {
+    return (
+      <Login
+        initialRole={role}
+        initialUsername={username}
+        loginError={error}
+        onLogin={login}
+        onRegister={register}
+      />
+    );
   }
 
-  return <Login onLogin={(data) => setRole(data.role)} />;
+  if (page === "dashboard" && role) {
+    const Dashboard = DASHBOARDS[role] || DASHBOARDS[normalizeRole(role)] || Frontdashboard;
+    return <Dashboard username={username} currentUser={currentUser} onLogout={logout} />;
+  }
+
+  // First screen shown: Home page
+  return <HomeLogin onLogin={goToLogin} />;
 }

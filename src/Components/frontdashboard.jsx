@@ -1,5 +1,6 @@
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import "./frontdashboard.css"; // all styles (including the extra widgets) now live in this one file
+import { frontdeskApi } from "../api.js";
 
 /* =========================================================
    CONSTANTS
@@ -659,9 +660,20 @@ function MoveRoomModal({ booking, candidates, onClose, onConfirm }) {
 /* =========================================================
    MAIN DASHBOARD
    ========================================================= */
-export default function FrontDashboard() {
+export default function FrontDashboard({ onLogout, username }) {
   /* core state (persisted in localStorage) */
   const [profile, setProfile] = usePersist("profile", DEFAULT_PROFILE, false);
+  const activeProfile = useMemo(() => {
+    if (!username) return profile;
+    const name = username.includes("@")
+      ? username.split("@")[0].replace(/[._]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+      : username;
+    return {
+      ...profile,
+      name,
+      email: username.includes("@") ? username : profile.email,
+    };
+  }, [profile, username]);
   const [settings, setSettings] = usePersist("settings", DEFAULT_SETTINGS, false);
   const [rooms, setRooms] = usePersist("rooms", INITIAL_ROOMS);
   const [bookings, setBookings] = usePersist("bookings", INITIAL_BOOKINGS);
@@ -674,6 +686,90 @@ export default function FrontDashboard() {
   const [now, setNow] = useState(new Date());
   const [online, setOnline] = useState(typeof navigator === "undefined" ? true : navigator.onLine);
   const USER = profile.name;
+
+  const refreshData = useCallback(async () => {
+    try {
+      const [rRes, bRes, srRes, nRes] = await Promise.allSettled([
+        frontdeskApi.getRooms(),
+        frontdeskApi.getBookings(),
+        frontdeskApi.getServiceRequests(),
+        frontdeskApi.getNotifications(),
+      ]);
+
+      if (rRes.status === "fulfilled" && rRes.value?.success && rRes.value.rooms?.length) {
+        setRooms(rRes.value.rooms.map((r) => ({
+          number: r.no,
+          floor: r.floor,
+          type: r.type,
+          status: r.status === "vacant_ready" ? "available" :
+                  r.status === "occupied" ? "occupied" :
+                  r.status === "vacant_dirty" ? "cleaning" :
+                  r.status === "being_cleaned" ? "cleaning" :
+                  r.status === "reserved" ? "reserved" :
+                  r.status === "out_of_service" ? "outOfService" : "available",
+          hk: r.status === "vacant_dirty" ? "dirty" : "clean",
+        })));
+      }
+
+      if (bRes.status === "fulfilled" && bRes.value?.success && bRes.value.bookings?.length) {
+        const mapped = bRes.value.bookings.map((b) => ({
+          id: b.booking_code,
+          db_id: b.booking_id,
+          booking_room_id: b.booking_room_id,
+          name: b.guest_name,
+          phone: b.phone || "9845000000",
+          email: b.email || "",
+          idType: "Aadhaar",
+          idNumber: b.id_number || "XXXX-1122",
+          purpose: "Leisure",
+          roomType: b.room_type || "Single",
+          guests: b.adults || 1,
+          checkIn: b.check_in_date,
+          checkOut: b.check_out_date,
+          status: b.room_status === "in_house" ? "Checked-In" :
+                  b.room_status === "departed" ? "Checked-Out" :
+                  b.room_status === "reserved" ? "Confirmed" : "Pending",
+          room: b.room_number || null,
+          eta: "14:00",
+          source: "Walk-in",
+          paid: parseFloat(b.advance_amount || 0),
+          total: parseFloat(b.rate_per_night || 2500) * Math.max(nightsBetween(b.check_in_date, b.check_out_date), 1),
+          charges: [],
+          payments: parseFloat(b.advance_amount || 0) > 0 ? [{ id: uid(), ts: Date.now(), mode: "Cash", amount: parseFloat(b.advance_amount) }] : [],
+        }));
+        setBookings(mapped);
+      }
+
+      if (srRes.status === "fulfilled" && srRes.value?.success && srRes.value.requests?.length) {
+        setRequests(srRes.value.requests.map((sr) => ({
+          id: `SR-${sr.id}`,
+          room: sr.room_number,
+          type: sr.category || "Service",
+          desc: sr.description,
+          priority: "Normal",
+          status: sr.status === "completed" ? "Done" : "Pending",
+          ts: Date.now(),
+        })));
+      }
+
+      if (nRes.status === "fulfilled" && nRes.value?.success && nRes.value.notifications?.length) {
+        setNotifications(nRes.value.notifications.map((n) => ({
+          id: n.id,
+          text: `${n.title}: ${n.message || ""}`,
+          prio: "Info",
+          section: "overview",
+          ts: Date.now(),
+          read: n.is_read,
+        })));
+      }
+    } catch (err) {
+      console.warn("Frontdesk fetch error:", err);
+    }
+  }, [setRooms, setBookings, setRequests, setNotifications]);
+
+  useEffect(() => {
+    refreshData();
+  }, [refreshData]);
 
   /* ui state */
   const [toast, setToast] = useState("");
@@ -861,6 +957,23 @@ export default function FrontDashboard() {
     });
     setBookings((p) => [nb, ...p]);
     if (draft.preferredRoom && nb.checkIn === TODAY) setRooms((p) => p.map((r) => (r.number === draft.preferredRoom ? { ...r, status: "reserved" } : r)));
+    try {
+      frontdeskApi.createBooking({
+        guest_name: draft.name.trim(),
+        phone: draft.phone,
+        email: draft.email,
+        id_type: draft.idType,
+        id_number: draft.idNumber.trim(),
+        room_number: draft.preferredRoom || null,
+        check_in_date: draft.checkIn,
+        check_out_date: draftCheckOut,
+        adults: Number(draft.guests),
+        advance_amount: adv,
+        payment_method: (draft.payMode || 'cash').toLowerCase().replace(/\s+/g, '_'),
+      }).then(() => refreshData()).catch((e) => console.warn("Backend booking create error:", e));
+    } catch (e) {
+      console.warn("Backend booking create error:", e);
+    }
     log("booking", `Created booking for ${nb.name} (${nb.status})`, nb.id, nb.paid);
     pushNotif(`New booking ${nb.status.toLowerCase()} for ${nightsDraft} night(s) - ${nb.name}.`, "Info", "booking", "overview");
     showToast(`Booking ${nb.id} created for ${nb.name} (${nb.status}).`);
@@ -909,6 +1022,11 @@ export default function FrontDashboard() {
     }));
     log("checkin", `Checked in ${b.name} to Room ${roomNumber}`, b.id, advance);
     pushNotif(`${b.name} checked into Room ${roomNumber}. Housekeeping and billing notified.`, "Info", "booking", "inhouse");
+    try {
+      frontdeskApi.checkin(b.booking_room_id || b.db_id || b.id).then(() => refreshData()).catch((e) => console.warn("Backend checkin error:", e));
+    } catch (e) {
+      console.warn("Backend checkin error:", e);
+    }
     setCheckInBooking(null);
     setPassBooking(updated);
   }
@@ -923,6 +1041,11 @@ export default function FrontDashboard() {
     if (b.room) setRooms((p) => p.map((r) => (r.number === b.room ? { number: r.number, floor: r.floor, type: r.type, status: "cleaning", hk: "dirty" } : r)));
     log("checkout", `Checked out ${b.name} from Room ${b.room}`, b.id, settled ? due : 0);
     pushNotif(`Room ${b.room} needs cleaning - ${b.name} checked out.`, "Info", "rooms", "rooms");
+    try {
+      frontdeskApi.checkout(b.booking_room_id || b.db_id || b.id).then(() => refreshData()).catch((e) => console.warn("Backend checkout error:", e));
+    } catch (e) {
+      console.warn("Backend checkout error:", e);
+    }
     setCheckOutBooking(null);
     showToast(`${b.name} checked out. Room ${b.room} sent to housekeeping.`);
   }
@@ -1341,7 +1464,7 @@ Generated ${new Date().toLocaleString("en-IN")} by ${USER}`, "text/plain", `Invo
       {/* HEADER */}
       <header className="fd-header">
         <div className="fd-header-left">
-          <div className="fd-logo-circle"><Icon name="key" size={20} color="var(--gold-light)" /></div>
+          <img src="/logo.png" alt="VEYRA Logo" className="fd-logo-img" />
           <div>
             <div className="fd-hotel-name">VEYRA</div>
             <div className="fd-hotel-sub">Front Desk Dashboard</div>
@@ -1381,18 +1504,21 @@ Generated ${new Date().toLocaleString("en-IN")} by ${USER}`, "text/plain", `Invo
           <div style={{ position: "relative" }}>
             <button className="fd-user fx-user-btn" onClick={() => setMenu(menu === "profile" ? null : "profile")} aria-haspopup="menu" aria-expanded={menu === "profile"}>
               <div className="fd-avatar"><Icon name="user" size={15} color="var(--gold-light)" /></div>
-              <span className="fd-user-name">{profile.name}</span>
+              <span className="fd-user-name">{activeProfile.name}</span>
               <Icon name="chevron" size={14} color="var(--gold-light)" />
             </button>
             {menu === "profile" && (
               <div className="fd-card fx-dropdown fx-menu" role="menu">
                 <div className="fx-menu-head">
-                  <div className="fx-menu-name">{profile.name}</div>
-                  <div style={S.muted}>{profile.role}</div>
+                  <div className="fx-menu-name">{activeProfile.name}</div>
+                  <div style={S.muted}>{activeProfile.role}</div>
                 </div>
                 <button className="fx-menu-item" role="menuitem" onClick={() => { setProfileModal("view"); setMenu(null); }}><Icon name="eye" size={15} /> View profile</button>
                 <button className="fx-menu-item" role="menuitem" onClick={() => { setProfileModal("edit"); setMenu(null); }}><Icon name="edit" size={15} /> Edit profile</button>
                 <button className="fx-menu-item" role="menuitem" onClick={() => { setProfileModal("settings"); setMenu(null); }}><Icon name="settings" size={15} /> Settings</button>
+                <button className="fx-menu-item fx-menu-item-logout" role="menuitem" style={{ color: "var(--red)", borderTop: "1px solid var(--line)", marginTop: 4 }} onClick={() => { setMenu(null); if (onLogout) onLogout(); }}>
+                  <Icon name="logout" size={15} color="var(--red)" /> Log out
+                </button>
               </div>
             )}
           </div>
@@ -1412,7 +1538,7 @@ Generated ${new Date().toLocaleString("en-IN")} by ${USER}`, "text/plain", `Invo
               {item.key === "requests" && openRequests.length > 0 && <span className="fd-sidebar-badge">{openRequests.length}</span>}
             </button>
           ))}
-          <button className="fd-sidebar-btn fd-sidebar-logout" onClick={() => showToast("Logged out. Connect this button to your sign-in logic.")}>
+          <button className="fd-sidebar-btn fd-sidebar-logout" onClick={() => { if (onLogout) onLogout(); else showToast("Logged out."); }}>
             <Icon name="logout" size={17} color="var(--red)" />
             <span>Log out</span>
           </button>

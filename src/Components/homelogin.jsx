@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Login from "./login.jsx";
 import "./homelogin.css";
 
@@ -18,11 +18,12 @@ const stats = [
   { icon: "ti-chart-pie", value: "94%", label: "Current occupancy" },
 ];
 
+// `role` must match a role name used by login.jsx / loginaction.jsx
 const departments = [
-  { icon: "ti-door", title: "Front desk", desc: "Bookings, room allocation, and digital check-in passes." },
-  { icon: "ti-sparkles", title: "Housekeeping", desc: "Real-time room status across every floor." },
-  { icon: "ti-file-invoice", title: "Billing", desc: "Itemized invoices and organized payment records." },
-  { icon: "ti-settings", title: "Administration", desc: "Staff accounts, permissions, and property-wide reports." },
+  { icon: "ti-door", title: "Front Desk", role: "Front Desk", desc: "Bookings, room allocation, and digital check-in passes." },
+  { icon: "ti-sparkles", title: "Housekeeping", role: "Housekeeping", desc: "Real-time room status across every floor." },
+  { icon: "ti-file-invoice", title: "Billing", role: "Billing", desc: "Itemized invoices and organized payment records." },
+  { icon: "ti-settings", title: "Admin", role: "Admin", desc: "Staff accounts, permissions, and property-wide reports." },
 ];
 
 const journey = [
@@ -68,9 +69,10 @@ export default function HomeLogin({ onLogin }) {
   }, []);
 
   // Works with or without an onLogin prop: if the parent gives none, open Login here.
-  const handleLogin = () => {
+  // roleName is optional: a department's Login button passes its role.
+  const handleLogin = (roleName) => {
     window.scrollTo(0, 0);
-    if (onLogin) onLogin();
+    if (onLogin) onLogin(roleName);
     else setShowLogin(true);
   };
 
@@ -87,7 +89,7 @@ export default function HomeLogin({ onLogin }) {
     <div className="hp">
       <nav className={`hp-nav ${scrolled ? "is-scrolled" : ""}`}>
         <a href="#top" onClick={jump("top")} className="hp-brand">
-          <span className="hp-badge"><i className="ti ti-building-skyscraper" aria-hidden="true"></i></span>
+          <img src="/logo.png" alt="VEYRA Logo" className="hp-logo-img" />
           <span className="hp-brand-name">VEYRA</span>
         </a>
         <div className="hp-links">
@@ -96,7 +98,7 @@ export default function HomeLogin({ onLogin }) {
           <a href="#journey" onClick={jump("journey")}>Guest journey</a>
           <a href="#contact" onClick={jump("contact")}>Contact</a>
         </div>
-        <button type="button" className="hp-btn hp-btn--gold" onClick={handleLogin}>Staff login</button>
+        <button type="button" className="hp-btn hp-btn--gold" onClick={() => handleLogin()}>Staff login</button>
       </nav>
 
       <header className="hp-hero" id="top">
@@ -113,7 +115,7 @@ export default function HomeLogin({ onLogin }) {
           <h1>Every stay, precisely managed.</h1>
           <p>One system for bookings, rooms, and service, from arrival to departure.</p>
           <div className="hp-cta">
-            <button type="button" className="hp-btn hp-btn--gold hp-btn--lg" onClick={handleLogin}>Staff login</button>
+            <button type="button" className="hp-btn hp-btn--gold hp-btn--lg" onClick={() => handleLogin()}>Staff login</button>
             <a href="#journey" onClick={jump("journey")} className="hp-btn hp-btn--ghost hp-btn--lg">See how it works</a>
           </div>
         </div>
@@ -160,6 +162,7 @@ export default function HomeLogin({ onLogin }) {
                 <span className="hp-dept-icon"><i className={`ti ${d.icon}`} aria-hidden="true"></i></span>
                 <h3>{d.title}</h3>
                 <p>{d.desc}</p>
+                <button type="button" className="hp-btn hp-btn--gold" onClick={() => handleLogin(d.role)}>Login</button>
               </div>
             ))}
           </div>
@@ -208,7 +211,10 @@ export default function HomeLogin({ onLogin }) {
       <footer className="hp-footer" id="contact">
         <div className="hp-footer-grid">
           <div>
-            <span className="hp-footer-brand">VEYRA</span>
+            <div className="hp-footer-brand-wrap">
+              <img src="/logo.png" alt="VEYRA Logo" className="hp-footer-logo-img" />
+              <span className="hp-footer-brand">VEYRA</span>
+            </div>
             <p className="hp-footer-about">Internal staff system for front desk, housekeeping, billing, and administration.</p>
           </div>
           <div>

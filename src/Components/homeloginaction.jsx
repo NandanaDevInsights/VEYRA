@@ -86,7 +86,7 @@ export default function HomeLoginAction() {
     <div className="hp hp--locked">
       <nav className={`hp-nav ${scrolled ? "is-scrolled" : ""}`}>
         <div className="hp-brand">
-          <span className="hp-badge"><i className="ti ti-building-skyscraper" aria-hidden="true"></i></span>
+          <img src="/logo.png" alt="VEYRA Logo" className="hp-logo-img" />
           <span className="hp-brand-name">VEYRA</span>
         </div>
         <div className="hp-links">
@@ -204,7 +204,10 @@ export default function HomeLoginAction() {
       <footer className="hp-footer" id="contact">
         <div className="hp-footer-grid">
           <div>
-            <span className="hp-footer-brand">VEYRA</span>
+            <div className="hp-footer-brand-wrap">
+              <img src="/logo.png" alt="VEYRA Logo" className="hp-footer-logo-img" />
+              <span className="hp-footer-brand">VEYRA</span>
+            </div>
             <p className="hp-footer-about">Internal staff system for front desk, housekeeping, billing, and administration.</p>
           </div>
           <div>

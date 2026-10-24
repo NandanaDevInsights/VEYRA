@@ -1,12 +1,23 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import "./login.css";
 
 const ROLES = [
-  { name: "Front desk", icon: "ti-bell-ringing" },
+  { name: "Front Desk", icon: "ti-bell-ringing" },
   { name: "Housekeeping", icon: "ti-bed" },
   { name: "Billing", icon: "ti-receipt" },
-  { name: "Administrator", icon: "ti-settings" },
+  { name: "Admin", icon: "ti-settings" },
 ];
+
+function findRole(roleName) {
+  if (!roleName) return ROLES[0];
+  const r = String(roleName).trim().toLowerCase();
+  return (
+    ROLES.find((item) => item.name.toLowerCase() === r) ||
+    ROLES.find((item) => (r.startsWith("admin") && item.name === "Admin")) ||
+    ROLES.find((item) => (r.startsWith("front") && item.name === "Front Desk")) ||
+    ROLES[0]
+  );
+}
 
 function HotelArt() {
   const win = [];
@@ -34,30 +45,82 @@ function HotelArt() {
   );
 }
 
-// onLogin is provided by LoginAction.jsx
-export default function LoginPage({ onLogin }) {
-  const [role, setRole] = useState("Front desk");
-  const [username, setUsername] = useState("");
+// onLogin, onRegister, initialRole, initialUsername and loginError are provided by loginaction.jsx
+export default function LoginPage({ onLogin, onRegister, initialRole, initialUsername, loginError }) {
+  const [mode, setMode] = useState("login"); // "login" | "register"
+  const [prevInitialRole, setPrevInitialRole] = useState(initialRole);
+  const [role, setRole] = useState(() => findRole(initialRole).name);
+  const [prevInitialUser, setPrevInitialUser] = useState(initialUsername);
+  const [username, setUsername] = useState(initialUsername || "");
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(false);
-  const [error, setError] = useState(false);
+  const [localError, setLocalError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const roleIcon = ROLES.find((r) => r.name === role).icon;
+  if (initialRole !== prevInitialRole) {
+    setPrevInitialRole(initialRole);
+    setRole(findRole(initialRole).name);
+  }
 
-  const handleSignIn = (e) => {
+  if (initialUsername !== prevInitialUser) {
+    setPrevInitialUser(initialUsername);
+    if (initialUsername) setUsername(initialUsername);
+  }
+
+  const roleIcon = findRole(role).icon;
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!username.trim() || !password.trim()) {
-      setError(true);
-      return;
-    }
-    setError(false);
+    setLocalError("");
 
-    // TODO: replace with real authentication call, then call onLogin on success
-    if (onLogin) {
-      onLogin({ role, username: username.trim(), remember });
+    if (mode === "login") {
+      if (!username.trim() || !password.trim()) {
+        setLocalError("Enter both your username and password.");
+        return;
+      }
+      // loginaction.jsx validates credentials and redirects on success
+      if (onLogin) {
+        onLogin({ role, username: username.trim(), password, remember });
+      }
+    } else {
+      if (!fullName.trim()) {
+        setLocalError("Please enter your full name.");
+        return;
+      }
+      if (!username.trim()) {
+        setLocalError("Please enter a username.");
+        return;
+      }
+      if (!email.trim()) {
+        setLocalError("Please enter an email address.");
+        return;
+      }
+      if (!password.trim() || password.trim().length < 4) {
+        setLocalError("Password must be at least 4 characters.");
+        return;
+      }
+
+      setLoading(true);
+      if (onRegister) {
+        const res = await onRegister({
+          role,
+          full_name: fullName.trim(),
+          username: username.trim(),
+          email: email.trim(),
+          password: password.trim(),
+        });
+        if (res && !res.success) {
+          setLocalError(res.error || "Registration failed.");
+        }
+      }
+      setLoading(false);
     }
   };
+
+  const displayedError = localError || (mode === "login" ? loginError : "");
 
   return (
     <div className="lp">
@@ -66,14 +129,42 @@ export default function LoginPage({ onLogin }) {
           <HotelArt />
           <div className="lp-header-content">
             <div className="lp-mark">
-              <i className="ti ti-building-skyscraper" aria-hidden="true"></i>
+              <img src="/logo.png" alt="VEYRA Logo" className="lp-logo-img" />
             </div>
             <h1 className="lp-name">VEYRA</h1>
             <p className="lp-tag">Staff management portal</p>
           </div>
         </header>
 
-        <form className="lp-form" onSubmit={handleSignIn} noValidate>
+        <form className="lp-form" onSubmit={handleSubmit} noValidate>
+          {/* Mode Switcher Tabs */}
+          <div className="lp-tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "login"}
+              className={`lp-tab ${mode === "login" ? "active" : ""}`}
+              onClick={() => {
+                setMode("login");
+                setLocalError("");
+              }}
+            >
+              Sign in
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "register"}
+              className={`lp-tab ${mode === "register" ? "active" : ""}`}
+              onClick={() => {
+                setMode("register");
+                setLocalError("");
+              }}
+            >
+              Register
+            </button>
+          </div>
+
           <div className="lp-field">
             <label htmlFor="role">Role</label>
             <div className="lp-input">
@@ -89,35 +180,83 @@ export default function LoginPage({ onLogin }) {
             </div>
           </div>
 
+          {mode === "register" && (
+            <div className="lp-field">
+              <label htmlFor="fullName">Full Name</label>
+              <div className="lp-input">
+                <i className="ti ti-id lp-lead" aria-hidden="true"></i>
+                <input
+                  id="fullName"
+                  type="text"
+                  autoComplete="name"
+                  placeholder="e.g. John Mathews"
+                  value={fullName}
+                  onChange={(e) => {
+                    setFullName(e.target.value);
+                    setLocalError("");
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
           <div className="lp-field">
-            <label htmlFor="username">Username or email</label>
+            <label htmlFor="username">{mode === "register" ? "Username" : "Username or email"}</label>
             <div className="lp-input">
               <i className="ti ti-user lp-lead" aria-hidden="true"></i>
               <input
                 id="username"
                 type="text"
                 autoComplete="username"
-                placeholder="j.mathews"
+                placeholder={mode === "register" ? "e.g. j.mathews" : "j.mathews"}
                 value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                onChange={(e) => {
+                  setUsername(e.target.value);
+                  setLocalError("");
+                }}
               />
             </div>
           </div>
 
+          {mode === "register" && (
+            <div className="lp-field">
+              <label htmlFor="email">Email</label>
+              <div className="lp-input">
+                <i className="ti ti-mail lp-lead" aria-hidden="true"></i>
+                <input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  placeholder="e.g. j.mathews@hotel.in"
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setLocalError("");
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
           <div className="lp-field">
             <div className="lp-label-row">
               <label htmlFor="password">Password</label>
-              <a href="#forgot" className="lp-forgot">Forgot password?</a>
+              {mode === "login" && (
+                <a href="#forgot" className="lp-forgot">Forgot password?</a>
+              )}
             </div>
             <div className="lp-input">
               <i className="ti ti-lock lp-lead" aria-hidden="true"></i>
               <input
                 id="password"
                 type={showPassword ? "text" : "password"}
-                autoComplete="current-password"
-                placeholder="Enter your password"
+                autoComplete={mode === "register" ? "new-password" : "current-password"}
+                placeholder={mode === "register" ? "Create a password (min 4 chars)" : "Enter your password"}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  setLocalError("");
+                }}
               />
               <button
                 type="button"
@@ -130,18 +269,54 @@ export default function LoginPage({ onLogin }) {
             </div>
           </div>
 
-          <label className="lp-remember">
-            <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-            Keep me signed in on this device
-          </label>
+          {mode === "login" && (
+            <label className="lp-remember">
+              <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+              Keep me signed in on this device
+            </label>
+          )}
 
-          {error && (
+          {displayedError && (
             <div className="lp-error" role="alert">
-              Enter both your username and password.
+              {displayedError}
             </div>
           )}
 
-          <button type="submit" className="lp-submit">Sign in</button>
+          <button type="submit" className="lp-submit" disabled={loading}>
+            {loading ? "Processing..." : mode === "register" ? "Register & Sign in" : "Sign in"}
+          </button>
+
+          <p className="lp-switch-text">
+            {mode === "login" ? (
+              <>
+                New staff member?{" "}
+                <button
+                  type="button"
+                  className="lp-link-btn"
+                  onClick={() => {
+                    setMode("register");
+                    setLocalError("");
+                  }}
+                >
+                  Register here
+                </button>
+              </>
+            ) : (
+              <>
+                Already have an account?{" "}
+                <button
+                  type="button"
+                  className="lp-link-btn"
+                  onClick={() => {
+                    setMode("login");
+                    setLocalError("");
+                  }}
+                >
+                  Sign in
+                </button>
+              </>
+            )}
+          </p>
 
           <p className="lp-secure">
             <i className="ti ti-shield-lock" aria-hidden="true"></i>

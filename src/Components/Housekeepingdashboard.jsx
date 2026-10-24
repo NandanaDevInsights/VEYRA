@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import "./Housekeeping.css";
+import { housekeepingApi } from "../api.js";
 
 const ME0 = { id: "HK-1042", name: "Anita Joseph", role: "Housekeeping Staff", dept: "Housekeeping", phone: "+91 98470 11042", email: "anita@grandpalm.com", area: "Floors 1 and 2", shift: "07:00 – 15:00", pw: "hk12345" };
 const STAFF = { "HK-1042": "Anita Joseph", "HK-1043": "Priya Nair" };
@@ -79,8 +80,15 @@ const Prefs = ({ prefs, setPrefs }) => (
   <ul className="lines">{NTYPES.map((k) => <li key={k}><span>{k} notifications</span><label className="switch"><input type="checkbox" checked={prefs[k] !== false} onChange={(e) => setPrefs({ ...prefs, [k]: e.target.checked })} /><i /></label></li>)}</ul>
 );
 
-export default function HousekeepingDashboard() {
-  const [me, setMe] = useState(ME0);
+export default function HousekeepingDashboard({ onLogout, username }) {
+  const initialMe = () => {
+    if (!username) return ME0;
+    const name = username.includes("@")
+      ? username.split("@")[0].replace(/[._]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+      : username;
+    return { ...ME0, name, email: username.includes("@") ? username : ME0.email };
+  };
+  const [me, setMe] = useState(initialMe);
   const [view, setView] = useState("dashboard"), [ptab, setPtab] = useState("view"), [menu, setMenu] = useState(false), [modal, setModal] = useState(null), [out, setOut] = useState(false);
   const [toasts, setToasts] = useState([]), [rooms, setRooms] = useState(ROOMS0), [notes, setNotes] = useState(NOTE0);
   const [acts, setActs] = useState([["Room 102 cleaned", "08:15"], ["Room 105 assigned", "07:55"], ["Service request received", "09:10"], ["Room 110 marked for maintenance", "08:05"], ["Guest checkout received: Room 108", "07:40"]]);
@@ -93,12 +101,83 @@ export default function HousekeepingDashboard() {
   const [punch, setPunch] = useState({ in: new Date().setHours(7, 2, 0, 0), out: null });
   const [leaves, setLeaves] = useState([{ id: 1, from: "10 Oct", to: "11 Oct", type: "Casual", status: "Approved" }]), [lf, setLf] = useState({ from: "", to: "", type: "Casual" });
   const [prefs, setPrefs] = useState({}), [sys, setSys] = useState({ compact: false, h24: false }), [edit, setEdit] = useState({}), [tick, setTick] = useState(new Date());
+
+  const refreshData = useCallback(async () => {
+    try {
+      const [ovRes, tRes, rRes, srRes, cRes, supRes, attRes, lRes] = await Promise.allSettled([
+        housekeepingApi.getOverview(),
+        housekeepingApi.getTasks(),
+        housekeepingApi.getRooms(),
+        housekeepingApi.getServiceRequests(),
+        housekeepingApi.getComplaints(),
+        housekeepingApi.getSupplies(),
+        housekeepingApi.getAttendance(),
+        housekeepingApi.getLeave(),
+      ]);
+
+      if (rRes.status === "fulfilled" && rRes.value?.success && rRes.value.rooms?.length) {
+        const mappedRooms = rRes.value.rooms.map((rm) => {
+          let st = "available";
+          if (rm.status === "occupied") st = "occupied";
+          else if (rm.status === "vacant_dirty") st = "required";
+          else if (rm.status === "being_cleaned") st = "progress";
+          else if (rm.status === "out_of_service") st = "maintenance";
+          else if (rm.status === "reserved") st = "assigned";
+          return R(Number(rm.no), rm.type, st, "Checkout Cleaning", { by: ME });
+        });
+        setRooms(mappedRooms);
+      }
+
+      if (supRes.status === "fulfilled" && supRes.value?.success && supRes.value.supplies?.length) {
+        setSup(supRes.value.supplies.map((s) => ({ n: s.name, qty: s.qty, min: s.min_qty })));
+      }
+
+      if (cRes.status === "fulfilled" && cRes.value?.success && cRes.value.complaints?.length) {
+        setComps(cRes.value.complaints.map((c) => ({
+          id: `C-${c.id}`,
+          room: Number(c.room_number) || 101,
+          guest: c.guest_name || "Guest",
+          cat: "General",
+          text: c.subject + (c.description ? ": " + c.description : ""),
+          prio: "Normal",
+          by: ME,
+          status: c.status === "resolved" || c.status === "closed" ? "resolved" : "open",
+          reply: "",
+          created: c.created_at,
+          resolved: c.resolved_at || "",
+        })));
+      }
+
+      if (attRes.status === "fulfilled" && attRes.value?.success) {
+        if (attRes.value.clockedIn) {
+          setPunch({ in: Date.now() - 3600000, out: null });
+        }
+      }
+
+      if (lRes.status === "fulfilled" && lRes.value?.success && lRes.value.requests?.length) {
+        setLeaves(lRes.value.requests.map((lr) => ({
+          id: lr.id,
+          from: lr.start_date,
+          to: lr.end_date,
+          type: lr.leave_type,
+          status: lr.status.charAt(0).toUpperCase() + lr.status.slice(1),
+        })));
+      }
+    } catch (err) {
+      console.warn("Housekeeping fetch error:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshData();
+  }, [refreshData]);
+
   useEffect(() => { const t = setInterval(() => setTick(new Date()), 30000); return () => clearInterval(t); }, []);
 
   if (out) {
     return (
-      <div className="hk login-wrap"><div className="login"><span className="brand-mark">G</span><h1>You have been logged out</h1>
-        <p className="muted">Your session has ended.</p><button className="btn" onClick={() => { setOut(false); setView("dashboard"); }}>Sign in again</button></div></div>
+      <div className="hk login-wrap"><div className="login"><img src="/logo.png" alt="VEYRA Logo" className="hk-logo-img" /><h1>You have been logged out</h1>
+        <p className="muted">Your session has ended.</p><button className="btn" onClick={() => { if (onLogout) onLogout(); else { setOut(false); setView("dashboard"); } }}>Sign in again</button></div></div>
     );
   }
 
@@ -123,21 +202,47 @@ export default function HousekeepingDashboard() {
   const overdue = (r) => r.due < nowHM && !finished(r.status) && r.status !== "maintenance";
 
   const assignMe = (r) => { upd(r.id, { status: "assigned", by: ME }); log(`Room ${r.id} assigned`); toast(`Room ${r.id} assigned to you`); };
-  const start = (r) => { upd(r.id, { status: "progress" }); log(`Room ${r.id} cleaning started`); toast(`Room ${r.id}: cleaning started`); };
+  const start = async (r) => {
+    upd(r.id, { status: "progress" });
+    log(`Room ${r.id} cleaning started`);
+    toast(`Room ${r.id}: cleaning started`);
+    try {
+      await housekeepingApi.startTask(r.id);
+    } catch (err) {
+      console.warn("Backend start task:", err);
+    }
+  };
   const chain = (id) => { // Supervisor inspection is simulated here; connect to your backend.
     step(id, "completed", "inspection", 1800, () => log(`Room ${id} sent for inspection`));
     step(id, "inspection", "ready", 8000, () => { log(`Room ${id} inspection completed`); notify("Room", `Room ${id} is ready`); });
   };
-  const finish = (r) => { upd(r.id, { status: "completed", checked: all13 }); setOpen(null); log(`Room ${r.id} cleaned`); toast(`Room ${r.id}: cleaning completed`); chain(r.id); };
+  const finish = async (r) => {
+    upd(r.id, { status: "completed", checked: all13 });
+    setOpen(null);
+    log(`Room ${r.id} cleaned`);
+    toast(`Room ${r.id}: cleaning completed`);
+    chain(r.id);
+    try {
+      await housekeepingApi.completeTask(r.id);
+    } catch (err) {
+      console.warn("Backend complete task:", err);
+    }
+  };
   const toggle = (r, k) => upd(r.id, { checked: r.checked.includes(k) ? r.checked.filter((x) => x !== k) : [...r.checked, k], status: r.status === "assigned" ? "progress" : r.status });
   const resolveIssue = (r) => { setIssues((is) => is.map((i) => (i.room === r.id ? { ...i, status: "Resolved" } : i))); upd(r.id, { status: "completed", issue: null, checked: all13 }); log(`Room ${r.id} issue resolved`); toast("Issue resolved. Room cleaned."); chain(r.id); };
   const issueFor = (id) => { setIform({ ...iform, room: String(id || "") }); go("issue"); };
-  const sendIssue = () => {
+  const sendIssue = async () => {
     const id = Number(iform.room);
     if (!id || !iform.desc.trim()) return toast("Choose a room and add a description", "err");
     upd(id, { status: "maintenance", issue: iform.type });
     setIssues((is) => [{ id: `I-${is.length + 1}`, room: id, type: iform.type, desc: iform.desc, prio: iform.prio, at: iform.at.replace("T", " "), status: "Open" }, ...is]);
     log(`Room ${id} marked for maintenance`); notify("Maintenance", `Room ${id}: ${iform.type}`); toast("Issue reported");
+    try {
+      await housekeepingApi.requestMaintenance({ room_number: String(id), issue: `${iform.type}: ${iform.desc}` });
+      await refreshData();
+    } catch (err) {
+      console.warn("Backend maintenance error:", err);
+    }
     setIform({ room: "", type: ISSUES[0], desc: "", prio: "Normal", at: nowLocal(), file: "" });
   };
   const advance = (id) => setReqs((rs) => rs.map((r) => { if (r.id !== id) return r; const nx = { New: "Accepted", Accepted: "In Progress", "In Progress": "Completed" }[r.status]; if (nx === "Completed") log(`Service request ${id} completed`); return { ...r, status: nx, by: ME, done: nx === "Completed" ? clock() : "" }; }));
@@ -169,8 +274,8 @@ export default function HousekeepingDashboard() {
   return (
     <div className={`hk ${sys.compact ? "compact" : ""}`}>
       <aside className="side">
-        <div className="brand"><span className="brand-mark">G</span><div><b>VEYRA</b><small>Housekeeping portal</small></div></div>
-        <nav aria-label="Main">
+        <div className="brand"><img src="/logo.png" alt="VEYRA Logo" className="hk-logo-img" /><div><b>VEYRA</b><small>Housekeeping portal</small></div></div>
+        <nav aria-label="Main" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
           {NAV.map(([k, l, d]) => (
             <button key={k} className={`nav ${view === k ? "is-on" : ""}`} onClick={() => go(k, k === "profile" ? "view" : null)} aria-current={view === k ? "page" : undefined}>
               <Icon d={d} /><span>{l}</span>
@@ -180,6 +285,10 @@ export default function HousekeepingDashboard() {
               {k === "rooms" && cnt("assigned", "progress") > 0 && <em className="badge soft">{cnt("assigned", "progress")}</em>}
             </button>
           ))}
+          <button className="nav logout" onClick={() => { if (onLogout) onLogout(); else setModal("logout"); }}>
+            <Icon d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3 M16 15l4-4-4-4 M20 11H9" />
+            <span>Log out</span>
+          </button>
         </nav>
       </aside>
 
@@ -193,9 +302,13 @@ export default function HousekeepingDashboard() {
               <button className="who" onClick={() => setMenu(!menu)} aria-haspopup="menu" aria-expanded={menu}><Avatar name={me.name} /><span><b>{me.name}</b><small>{me.role}</small></span></button>
               {menu && (<><div className="scrim" onClick={() => setMenu(false)} />
                 <div className="dropdown" role="menu">
+                  <div className="hk-menu-head">
+                    <b>{me.name}</b>
+                    <small>{me.role}</small>
+                  </div>
                   <button onClick={() => go("profile", "view")}>View Profile</button><button onClick={() => go("profile", "edit")}>Edit Profile</button>
                   <button onClick={() => go("profile", "password")}>Change Password</button><button onClick={() => go("settings")}>Settings</button>
-                  <button className="danger" onClick={() => { setMenu(false); setModal("logout"); }}>Logout</button>
+                  <button className="danger" onClick={() => { setMenu(false); if (onLogout) onLogout(); else setModal("logout"); }}>Logout</button>
                 </div></>)}
             </div>
           </div>
@@ -454,7 +567,7 @@ export default function HousekeepingDashboard() {
       {modal === "logout" && (
         <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.target === e.currentTarget && setModal(null)}>
           <div className="dialog"><h3>Are you sure you want to logout?</h3>
-            <div className="two"><button className="btn btn-ghost" onClick={() => setModal(null)}>Cancel</button><button className="btn btn-danger" onClick={() => { setModal(null); setOut(true); }}>Logout</button></div></div>
+            <div className="two"><button className="btn btn-ghost" onClick={() => setModal(null)}>Cancel</button><button className="btn btn-danger" onClick={() => { setModal(null); if (onLogout) onLogout(); else setOut(true); }}>Logout</button></div></div>
         </div>)}
       <div className="toasts" aria-live="polite">{toasts.map((t) => <div key={t.id} className={`toast ${t.kind}`}>{t.msg}</div>)}</div>
     </div>
