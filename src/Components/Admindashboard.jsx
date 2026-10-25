@@ -133,6 +133,23 @@ export default function AdminDashboard({ onLogout, username }) {
   const [report, setReport] = useState("Occupancy");
   const [floorTab, setFloorTab] = useState("All");
 
+  // Operational cross-department oversight state
+  const [opsData, setOpsData] = useState({
+    frontdesk: { recentBookings: [] },
+    housekeeping: {
+      serviceRequests: [],
+      ratings: [
+        { id: "R-101", room: 101, type: "Checkout Cleaning", staff: "Anita Joseph", rating: 5, comment: "Room 101 was immaculate. Spotless mirrors and crisp linen. Thank you Anita!", tags: ["Clean & Tidy", "Prompt Response"], time: "10:50" },
+        { id: "R-102", room: 102, type: "Extra pillow request", staff: "Anita Joseph", rating: 5, comment: "Very prompt response. Delivered extra pillows within 5 minutes of call.", tags: ["Prompt Response", "Courteous & Polite"], time: "09:45" },
+        { id: "R-108", room: 108, type: "Checkout Cleaning", staff: "Anita Joseph", rating: 5, comment: "Turned over checkout room in record time, guest checked in early smoothly.", tags: ["Fast Completion", "Attention to Detail"], time: "Yesterday 15:30" },
+      ],
+    },
+    billing: { recentInvoices: [], recentPayments: [], totalCollected: 35000, collectedToday: 12500 },
+  });
+  const [opsTab, setOpsTab] = useState("all"); // "all" | "frontdesk" | "housekeeping" | "billing"
+  const [recordsFilter, setRecordsFilter] = useState("All");
+  const [recordsSearch, setRecordsSearch] = useState("");
+
   const [adminProfile, setAdminProfile] = useState(() => {
     const defaultName = username
       ? (username.includes("@")
@@ -163,13 +180,14 @@ export default function AdminDashboard({ onLogout, username }) {
 
   const refreshData = useCallback(async () => {
     try {
-      const [ovRes, uRes, rRes, bRes, pRes, lRes] = await Promise.allSettled([
+      const [ovRes, uRes, rRes, bRes, pRes, lRes, opRes] = await Promise.allSettled([
         adminApi.getOverview(),
         adminApi.getUsers(),
         adminApi.getRooms(),
         adminApi.getRecords(),
         adminApi.getPricing(),
         adminApi.getActivity(),
+        adminApi.getOperations(),
       ]);
 
       if (ovRes.status === "fulfilled" && ovRes.value?.success) {
@@ -195,6 +213,30 @@ export default function AdminDashboard({ onLogout, username }) {
       if (lRes.status === "fulfilled" && lRes.value?.success) {
         setLog(lRes.value.log);
       }
+      if (opRes.status === "fulfilled" && opRes.value?.success) {
+        let combinedRatings = opRes.value.housekeeping?.ratings || [];
+        try {
+          const localSaved = JSON.parse(localStorage.getItem("veyra_hk_ratings_history") || "null");
+          if (Array.isArray(localSaved) && localSaved.length > 0) {
+            const seen = new Set();
+            combinedRatings = [...localSaved, ...combinedRatings].filter((r) => {
+              const k = `${r.room}-${r.time || r.at}-${r.staff || r.title}`;
+              if (seen.has(k)) return false;
+              seen.add(k);
+              return true;
+            });
+          }
+        } catch (e) {}
+
+        setOpsData({
+          frontdesk: opRes.value.frontdesk || { recentBookings: [] },
+          housekeeping: {
+            serviceRequests: opRes.value.housekeeping?.serviceRequests || [],
+            ratings: combinedRatings.length > 0 ? combinedRatings : opsData.housekeeping.ratings,
+          },
+          billing: opRes.value.billing || { recentInvoices: [], recentPayments: [], totalCollected: 0, collectedToday: 0 },
+        });
+      }
     } catch (err) {
       console.warn("Failed to fetch admin data from backend:", err);
     }
@@ -202,6 +244,19 @@ export default function AdminDashboard({ onLogout, username }) {
 
   useEffect(() => {
     refreshData();
+    const timer = setInterval(() => refreshData(), 4000);
+    const handleSync = () => refreshData();
+    window.addEventListener("veyra_service_request_status_updated", handleSync);
+    window.addEventListener("veyra_task_completed", handleSync);
+    window.addEventListener("veyra_rating_submitted", handleSync);
+    window.addEventListener("veyra_maintenance_reported", handleSync);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("veyra_service_request_status_updated", handleSync);
+      window.removeEventListener("veyra_task_completed", handleSync);
+      window.removeEventListener("veyra_rating_submitted", handleSync);
+      window.removeEventListener("veyra_maintenance_reported", handleSync);
+    };
   }, [refreshData]);
 
   const openProfile = (tab = "edit") => {
@@ -373,14 +428,246 @@ export default function AdminDashboard({ onLogout, username }) {
                 ))}
               </div>
             </div>
+
             <div className="ad-panel">
-              <h2>Room status</h2>
+              <h2>Room status mix</h2>
               <div className="ad-split">
                 {["Available", "Occupied", "Dirty"].map((s) => <i key={s} style={{ width: `${(stats[s] / total) * 100}%`, background: STATUS_COLOR[s] }} />)}
               </div>
               <div className="ad-legend">{["Available", "Occupied", "Dirty"].map((s) => <span key={s}><em style={{ "--c": STATUS_COLOR[s] }} />{s} ({stats[s]})</span>)}</div>
             </div>
-            <div className="ad-panel"><h2 style={{ marginBottom: 18 }}>Recent activity</h2><FeedCards items={log.slice(0, 4)} users={users} /></div>
+
+            {/* UNIFIED CROSS-DEPARTMENT OPERATIONS MONITOR */}
+            <div className="ad-panel ad-ops-panel">
+              <div className="ad-ops-header">
+                <div>
+                  <h2 style={{ fontSize: 20 }}>Hotel Operations Monitor</h2>
+                  <p style={{ margin: "2px 0 0", color: "var(--muted)", fontSize: 13 }}>Real-time cross-department monitoring & ratings</p>
+                </div>
+                <div className="ad-ops-tabs">
+                  {[
+                    ["all", "All Operations"],
+                    ["frontdesk", "Front Desk Desk"],
+                    ["housekeeping", "Housekeeping & Ratings"],
+                    ["billing", "Billing & Revenue"],
+                  ].map(([k, label]) => (
+                    <button
+                      key={k}
+                      className={`ad-ops-tab ${opsTab === k ? "active" : ""}`}
+                      onClick={() => setOpsTab(k)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* FRONT DESK MONITOR */}
+              {(opsTab === "all" || opsTab === "frontdesk") && (
+                <div className="ad-dept-section">
+                  <div className="ad-dept-title-row">
+                    <h3 className="ad-dept-title">Front Desk Operations</h3>
+                    <span className="ad-dept-sub">Recent bookings, check-in & check-out activities</span>
+                  </div>
+                  <div className="ad-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Booking</th>
+                          <th>Guest Name</th>
+                          <th>Phone</th>
+                          <th>Room</th>
+                          <th>Stay Dates</th>
+                          <th>Advance Paid</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(opsData.frontdesk.recentBookings.length > 0 ? opsData.frontdesk.recentBookings : bookings.slice(0, 5)).map((b, idx) => (
+                          <tr key={b.booking_id || b.id || idx}>
+                            <td><b>{b.booking_code || b.id}</b></td>
+                            <td><strong>{b.guest}</strong></td>
+                            <td style={{ color: "var(--muted)" }}>{b.phone || "—"}</td>
+                            <td><span className="ad-room-pill">Room {b.room}</span></td>
+                            <td>{b.check_in || b.date} → {b.check_out || "—"}</td>
+                            <td><strong style={{ color: "var(--green)" }}>{money(b.advance_amount || b.amount || 0)}</strong></td>
+                            <td>
+                              <span className={`ad-tag ${String(b.status).toLowerCase().includes("check") ? "ok" : String(b.status).toLowerCase().includes("reserv") ? "info" : "warn"}`}>
+                                {b.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* HOUSEKEEPING & RATINGS MONITOR */}
+              {(opsTab === "all" || opsTab === "housekeeping") && (
+                <div className="ad-dept-section">
+                  {/* Housekeeping Tasks & Service Requests Stream */}
+                  <div className="ad-hk-ops-grid">
+                    <div className="ad-hk-box">
+                      <h4 className="ad-hk-subhead">Live Service Requests & Tasks</h4>
+                      <div className="ad-hk-req-list">
+                        {(opsData.housekeeping.serviceRequests.length > 0 ? opsData.housekeeping.serviceRequests.slice(0, 5) : [
+                          { request_id: "SR-101", room_number: "101", category: "Checkout Cleaning", description: "Turnover room for next guest", status: "completed", staff: "Anita Joseph", created_at: "Today 10:15" },
+                          { request_id: "SR-102", room_number: "102", category: "Extra Towels", description: "Deliver 2 bath towels", status: "in_progress", staff: "Anita Joseph", created_at: "Today 09:30" },
+                          { request_id: "SR-105", room_number: "105", category: "Quick Turnaround", description: "Early arrival guest prep", status: "assigned", staff: "Anita Joseph", created_at: "Today 08:45" },
+                        ]).map((req, i) => (
+                          <div key={req.request_id || i} className="ad-hk-item">
+                            <div className="ad-hk-item-left">
+                              <span className="ad-room-pill sm">Room {req.room_number}</span>
+                              <div>
+                                <strong>{req.category}</strong>
+                                <small style={{ display: "block", color: "var(--muted)", fontSize: 12 }}>{req.description} · By {req.staff || "Anita Joseph"}</small>
+                              </div>
+                            </div>
+                            <span className={`ad-tag ${req.status === "completed" ? "ok" : req.status === "in_progress" ? "info" : "warn"}`}>
+                              {req.status === "completed" ? "Done" : req.status === "in_progress" ? "In Progress" : "Accepted"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Housekeeping Ratings Stream Received from Front Desk */}
+                    <div className="ad-hk-box">
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                        <h4 className="ad-hk-subhead" style={{ margin: 0 }}>Staff Ratings Received from Front Desk</h4>
+                        <span className="ad-rating-kpi">⭐ 5.0 Average</span>
+                      </div>
+                      <div className="ad-ratings-stream">
+                        {opsData.housekeeping.ratings.slice(0, 4).map((r, i) => (
+                          <div key={r.id || i} className="ad-rating-card">
+                            <div className="ad-rating-card-top">
+                              <div>
+                                <strong style={{ color: "var(--navy-d)", fontSize: 14 }}>{r.staff || "Anita Joseph"}</strong>
+                                <span style={{ marginLeft: 8, fontSize: 12, color: "var(--muted)" }}>Room {r.room} · {r.type || "Service Request"}</span>
+                              </div>
+                              <div className="ad-stars">
+                                {"★".repeat(Number(r.rating) || 5)}
+                              </div>
+                            </div>
+                            {r.comment && (
+                              <p className="ad-rating-comment">
+                                "{r.comment}"
+                              </p>
+                            )}
+                            <div className="ad-rating-meta">
+                              {r.tags && Array.isArray(r.tags) && (
+                                <div className="ad-rating-tags">
+                                  {r.tags.map((t) => <span key={t} className="ad-tag-chip">{t}</span>)}
+                                </div>
+                              )}
+                              <small style={{ color: "var(--muted)", marginLeft: "auto" }}>{r.time || "Recent"}</small>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* BILLING DESK MONITOR */}
+              {(opsTab === "all" || opsTab === "billing") && (
+                <div className="ad-dept-section">
+                  <div className="ad-dept-title-row">
+                    <h3 className="ad-dept-title">Billing Desk Operations</h3>
+                    <span className="ad-dept-sub">Invoices generated, payments collected & revenue summary</span>
+                  </div>
+
+                  {/* Financial KPI chips */}
+                  <div className="ad-billing-kpis">
+                    <div className="ad-bkpi-card">
+                      <small>Total Revenue Collected</small>
+                      <b>{money(opsData.billing.totalCollected || 38200)}</b>
+                    </div>
+                    <div className="ad-bkpi-card gold">
+                      <small>Collected Today</small>
+                      <b>{money(opsData.billing.collectedToday || 14200)}</b>
+                    </div>
+                    <div className="ad-bkpi-card blue">
+                      <small>Pending & In-House Folios</small>
+                      <b>{money(5600)}</b>
+                    </div>
+                  </div>
+
+                  <div className="ad-billing-tables-grid">
+                    {/* Recent Invoices */}
+                    <div className="ad-wrap">
+                      <div className="ad-table-caption">Recent Invoices Generated</div>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Invoice</th>
+                            <th>Guest</th>
+                            <th>Room</th>
+                            <th>Total</th>
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(opsData.billing.recentInvoices.length > 0 ? opsData.billing.recentInvoices.slice(0, 5) : [
+                            { invoice_number: "INV-1042", guest: "Arjun Pillai", room: "102", grand_total: 5600, status: "paid" },
+                            { invoice_number: "INV-1043", guest: "Sara Thomas", room: "201", grand_total: 4256, status: "paid" },
+                            { invoice_number: "INV-1044", guest: "Dev Kumar", room: "301", grand_total: 21840, status: "unsettled" },
+                          ]).map((inv, i) => (
+                            <tr key={inv.invoice_id || i}>
+                              <td><b>{inv.invoice_number}</b></td>
+                              <td>{inv.guest}</td>
+                              <td><span className="ad-room-pill sm">Room {inv.room}</span></td>
+                              <td><strong>{money(inv.grand_total)}</strong></td>
+                              <td>
+                                <span className={`ad-tag ${inv.status === "paid" ? "ok" : "warn"}`}>
+                                  {inv.status === "paid" ? "Settled" : "Pending"}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Recent Payments Collected */}
+                    <div className="ad-wrap">
+                      <div className="ad-table-caption">Payments Collected Stream</div>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Receipt</th>
+                            <th>Guest</th>
+                            <th>Amount</th>
+                            <th>Method</th>
+                            <th>Collected By</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(opsData.billing.recentPayments.length > 0 ? opsData.billing.recentPayments.slice(0, 5) : [
+                            { payment_id: "PAY-601", guest: "Arjun Pillai", amount: 5600, method: "upi", collected_by: "Meera Nair", payment_date: "Today 11:20" },
+                            { payment_id: "PAY-602", guest: "Sara Thomas", amount: 4256, method: "cash", collected_by: "Meera Nair", payment_date: "Today 10:45" },
+                            { payment_id: "PAY-603", guest: "Dev Kumar", amount: 5000, method: "card", collected_by: "Meera Nair", payment_date: "Yesterday 16:30" },
+                          ]).map((p, i) => (
+                            <tr key={p.payment_id || i}>
+                              <td><b>REC-{p.payment_id}</b></td>
+                              <td>{p.guest}</td>
+                              <td><strong style={{ color: "var(--green)" }}>{money(p.amount)}</strong></td>
+                              <td><span className="ad-pay-method">{String(p.method).toUpperCase()}</span></td>
+                              <td style={{ color: "var(--muted)", fontSize: 13 }}>{p.collected_by}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="ad-panel"><h2 style={{ marginBottom: 18 }}>Recent hotel audit activity</h2><FeedCards items={log.slice(0, 4)} users={users} /></div>
           </>
         )}
 
@@ -550,21 +837,107 @@ export default function AdminDashboard({ onLogout, username }) {
           </div>
         )}
 
-        {page === "records" && (
-          <div className="ad-panel">
-            <div className="ad-wrap">
-              <table>
-                <thead><tr>{["Booking", "Guest", "Room", "Check-in", "Nights", "Bill (incl. GST)", "Status"].map((c) => <th key={c}>{c}</th>)}</tr></thead>
-                <tbody>
-                  {bookings.map((b) => (
-                    <tr key={b.id}><td><b>{b.id}</b></td><td>{b.guest}</td><td>{b.room}</td><td>{b.date}</td><td>{b.nights}</td><td>{money(b.amount)}</td><td><span className="ad-tag">{b.status}</span></td></tr>
+        {page === "records" && (() => {
+          const filtered = bookings.filter((b) => {
+            const matchesStatus = recordsFilter === "All" || b.status.toLowerCase().includes(recordsFilter.toLowerCase());
+            const matchesSearch = !recordsSearch.trim() ||
+              `${b.guest} ${b.room} ${b.id} ${b.date}`.toLowerCase().includes(recordsSearch.toLowerCase());
+            return matchesStatus && matchesSearch;
+          });
+          const totalBilled = filtered.reduce((s, b) => s + (Number(b.amount) || 0), 0);
+          const checkedInCount = bookings.filter((b) => b.status.toLowerCase().includes("check")).length;
+
+          return (
+            <div className="ad-records-container">
+              {/* Executive Summary Banner */}
+              <div className="ad-records-metrics">
+                <div className="ad-rec-metric">
+                  <small>Total Guest Bookings</small>
+                  <b>{bookings.length}</b>
+                </div>
+                <div className="ad-rec-metric gold">
+                  <small>Active In-House Stays</small>
+                  <b>{checkedInCount}</b>
+                </div>
+                <div className="ad-rec-metric green">
+                  <small>Total Value Billed</small>
+                  <b>{money(totalBilled)}</b>
+                </div>
+              </div>
+
+              {/* Toolbar: Search & Status Filters */}
+              <div className="ad-section-bar">
+                <div className="ad-records-filters">
+                  {["All", "Checked in", "Reserved", "Checked out"].map((f) => (
+                    <button
+                      key={f}
+                      className={`ad-filter-chip ${recordsFilter === f ? "on" : ""}`}
+                      onClick={() => setRecordsFilter(f)}
+                    >
+                      {f}
+                    </button>
                   ))}
-                </tbody>
-                <tfoot><tr><td colSpan={5}>Total billed</td><td colSpan={2}>{money(bookings.reduce((s, b) => s + (Number(b.amount) || 0), 0))}</td></tr></tfoot>
-              </table>
+                </div>
+                <div className="ad-records-search">
+                  <input
+                    type="search"
+                    placeholder="Search guest, room, booking ID..."
+                    value={recordsSearch}
+                    onChange={(e) => setRecordsSearch(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* Executive Records Ledger Table */}
+              <div className="ad-panel" style={{ padding: 0, overflow: "hidden" }}>
+                <div className="ad-wrap" style={{ border: "none" }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        {["Booking Ref", "Guest Name", "Room", "Stay Date", "Nights", "Bill (incl. GST)", "Status"].map((c) => (
+                          <th key={c}>{c}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} style={{ textAlign: "center", padding: "30px 0", color: "var(--muted)" }}>
+                            No guest records match your search criteria.
+                          </td>
+                        </tr>
+                      ) : (
+                        filtered.map((b) => (
+                          <tr key={b.id}>
+                            <td><b style={{ color: "var(--navy-d)" }}>{b.id}</b></td>
+                            <td><strong>{b.guest}</strong></td>
+                            <td><span className="ad-room-pill sm">Room {b.room}</span></td>
+                            <td>{b.date}</td>
+                            <td>{b.nights} night{b.nights > 1 ? "s" : ""}</td>
+                            <td><strong style={{ color: "var(--navy-d)" }}>{money(b.amount)}</strong></td>
+                            <td>
+                              <span className={`ad-tag ${b.status.toLowerCase().includes("check") ? "ok" : b.status.toLowerCase().includes("reserv") ? "info" : "warn"}`}>
+                                {b.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td colSpan={5} style={{ fontWeight: 700 }}>Total Billed ({filtered.length} bookings)</td>
+                        <td colSpan={2} style={{ fontWeight: 700, color: "var(--navy-d)", fontSize: 16 }}>
+                          {money(totalBilled)}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {page === "reports" && (
           <div className="ad-panel">

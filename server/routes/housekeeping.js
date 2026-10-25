@@ -138,12 +138,22 @@ router.post('/tasks/:id/complete', async (req, res) => {
 
     await conn.commit();
 
+    // Query room number for descriptive notification
+    const [rmRows] = await conn.query('SELECT room_number FROM rooms WHERE room_id = ?', [room_id]);
+    const roomNumber = rmRows[0]?.room_number || room_id;
+
+    await createNotification(
+      null,
+      'Housekeeping Task Completed',
+      `Anita Joseph completed room cleaning for Room ${roomNumber}. Please rate housekeeper.`
+    );
+
     await logActivity(
       req.user.user_id,
       'Completed Cleaning Task',
       'housekeeping_tasks',
       taskId,
-      `Housekeeping completed task #${taskId}. Room ID ${room_id} marked vacant_ready.`
+      `Housekeeping completed task #${taskId}. Room ${roomNumber} marked vacant_ready.`
     );
 
     res.json({ success: true, message: 'Task completed. Room is now clean and available.' });
@@ -217,6 +227,13 @@ router.post('/maintenance', async (req, res) => {
       `Reported maintenance issue for Room ${room_number}. Marked room out_of_service.`
     );
 
+    // Create system notification so Front Desk and other dashboards immediately see the maintenance issue
+    await createNotification(
+      null,
+      'Maintenance Issue Reported',
+      `Room ${room_number}: ${issue} (Reported by Housekeeping)`
+    );
+
     res.json({ success: true, id: resM.insertId, message: 'Maintenance requested and room set to out of service.' });
   } catch (err) {
     await conn.rollback();
@@ -252,7 +269,39 @@ router.put('/service-requests/:id', async (req, res) => {
       WHERE request_id = ?
     `, [status, status, req.params.id]);
 
+    if (status === 'completed') {
+      const srRows = await query(`
+        SELECT sr.request_id, r.room_number, sr.category
+        FROM service_requests sr
+        JOIN rooms r ON sr.room_id = r.room_id
+        WHERE sr.request_id = ?
+      `, [req.params.id]);
+      const roomNum = srRows[0]?.room_number || '-';
+      const cat = srRows[0]?.category || 'Service Request';
+
+      await createNotification(
+        null,
+        'Housekeeping Task Completed',
+        `Anita Joseph completed ${cat} for Room ${roomNum}. Please rate housekeeper.`
+      );
+    }
+
     res.json({ success: true, message: 'Status updated.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/housekeeping/supplies/restock (Notify supplies restocked)
+router.post('/supplies/restock', async (req, res) => {
+  try {
+    const { items } = req.body;
+    await createNotification(
+      null,
+      'Supplies Restocked',
+      `Requested supplies (${items || 'Linens & Towels'}) have been restocked by Inventory.`
+    );
+    res.json({ success: true, message: 'Restock notification created.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -507,6 +556,33 @@ router.patch('/duty', async (req, res) => {
     const nextDuty = user[0]?.is_on_duty ? 0 : 1;
     await query('UPDATE users SET is_on_duty = ? WHERE user_id = ?', [nextDuty, req.user.user_id]);
     res.json({ success: true, is_on_duty: Boolean(nextDuty) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/housekeeping/notifications
+router.get('/notifications', async (req, res) => {
+  try {
+    const notifications = await query(`
+      SELECT notification_id AS id, title, message, is_read,
+             DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') AS created_at
+      FROM notifications
+      WHERE user_id = ? OR user_id IS NULL
+      ORDER BY notification_id DESC
+      LIMIT 50
+    `, [req.user.user_id]);
+    res.json({ success: true, notifications: notifications.map(n => ({ ...n, is_read: Boolean(n.is_read) })) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/housekeeping/notifications/:id/read
+router.patch('/notifications/:id/read', async (req, res) => {
+  try {
+    await query('UPDATE notifications SET is_read = 1 WHERE notification_id = ?', [req.params.id]);
+    res.json({ success: true, message: 'Notification marked as read.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

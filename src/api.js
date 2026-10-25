@@ -54,6 +54,7 @@ export const adminApi = {
   getPricing: () => apiRequest('/admin/pricing'),
   updatePricing: (data) => apiRequest('/admin/pricing', 'PUT', data),
   getActivity: (params = '') => apiRequest(`/admin/activity${params}`),
+  getOperations: () => apiRequest('/admin/operations'),
 };
 
 // Front Desk API
@@ -80,6 +81,7 @@ export const frontdeskApi = {
   getShiftReport: () => apiRequest('/frontdesk/shift-report'),
   saveShiftReport: (data) => apiRequest('/frontdesk/shift-report', 'POST', data),
   search: (q) => apiRequest(`/frontdesk/search?q=${encodeURIComponent(q)}`),
+  rateHousekeeper: (data) => apiRequest('/frontdesk/rate-housekeeper', 'POST', data),
 };
 
 // Housekeeping API
@@ -99,12 +101,15 @@ export const housekeepingApi = {
   createSupply: (data) => apiRequest('/housekeeping/supplies', 'POST', data),
   updateSupply: (id, data) => apiRequest(`/housekeeping/supplies/${id}`, 'PUT', data),
   deleteSupply: (id) => apiRequest(`/housekeeping/supplies/${id}`, 'DELETE'),
+  notifyRestock: (data) => apiRequest('/housekeeping/supplies/restock', 'POST', data),
   getAttendance: () => apiRequest('/housekeeping/attendance'),
   clockAttendance: () => apiRequest('/housekeeping/attendance/clock', 'POST'),
   getLeave: () => apiRequest('/housekeeping/leave'),
   applyLeave: (data) => apiRequest('/housekeeping/leave', 'POST', data),
   cancelLeave: (id) => apiRequest(`/housekeeping/leave/${id}`, 'DELETE'),
   toggleDuty: () => apiRequest('/housekeeping/duty', 'PATCH'),
+  getNotifications: () => apiRequest('/housekeeping/notifications'),
+  markNotificationRead: (id) => apiRequest(`/housekeeping/notifications/${id}/read`, 'PATCH'),
 };
 
 // Billing API
@@ -123,6 +128,12 @@ export const billingApi = {
   getRevenue: () => apiRequest('/billing/revenue'),
   getGuests: () => apiRequest('/billing/guests'),
   getActivity: () => apiRequest('/billing/activity'),
+  getNotifications: () => apiRequest('/billing/notifications'),
+  markNotificationRead: (id) => apiRequest(`/billing/notifications/${id}/read`, 'PATCH'),
+  getSalaries: () => apiRequest('/billing/salaries'),
+  createSalary: (data) => apiRequest('/billing/salaries', 'POST', data),
+  updateSalary: (id, data) => apiRequest(`/billing/salaries/${id}`, 'PUT', data),
+  disburseSalary: (id) => apiRequest(`/billing/salaries/${id}/disburse`, 'POST'),
 };
 
 export default {

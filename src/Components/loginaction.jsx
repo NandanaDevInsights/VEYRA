@@ -5,6 +5,7 @@ import Admindashboard from "./Admindashboard.jsx";
 import Billingdashboard from "./Billingdashboard.jsx";
 import Frontdashboard from "./frontdashboard.jsx";
 import Housekeepingdashboard from "./Housekeepingdashboard.jsx";
+import SplashAnimation from "./SplashAnimation.jsx";
 import { authApi } from "../api.js";
 
 // Role names supported by the system
@@ -34,10 +35,24 @@ const DASHBOARDS = {
 
 // Hook containing all login flow state & handlers
 export function useLoginAction() {
-  const [page, setPage] = useState("home"); // "home" | "login" | "dashboard"
-  const [role, setRole] = useState("Front Desk");
-  const [username, setUsername] = useState("");
-  const [currentUser, setCurrentUser] = useState(null);
+  const getSavedUser = () => {
+    try {
+      const token = localStorage.getItem("veyra_token");
+      const userStr = localStorage.getItem("veyra_user");
+      if (token && userStr) {
+        return JSON.parse(userStr);
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  };
+
+  const savedUser = getSavedUser();
+  const [page, setPage] = useState(() => (savedUser ? "dashboard" : "home")); // "home" | "login" | "dashboard"
+  const [role, setRole] = useState(() => (savedUser ? (savedUser.role || "Front Desk") : "Front Desk"));
+  const [username, setUsername] = useState(() => (savedUser ? (savedUser.full_name || savedUser.username || "") : ""));
+  const [currentUser, setCurrentUser] = useState(() => savedUser);
   const [error, setError] = useState("");
 
   // Role selection handling & navigation from home to login
@@ -141,27 +156,30 @@ export function useLoginAction() {
 }
 
 // Chooses which screen to render based on the current login flow state.
-// Home page (homelogin.jsx) is the first screen shown when the app starts.
+// Splash animation is shown before home page appears when app starts.
 export default function LoginAction() {
   const { page, role, username, currentUser, error, goToLogin, login, register, logout } = useLoginAction();
+  const [showSplash, setShowSplash] = useState(() => !localStorage.getItem("veyra_token"));
 
-  if (page === "login") {
-    return (
-      <Login
-        initialRole={role}
-        initialUsername={username}
-        loginError={error}
-        onLogin={login}
-        onRegister={register}
-      />
-    );
-  }
-
-  if (page === "dashboard" && role) {
-    const Dashboard = DASHBOARDS[role] || DASHBOARDS[normalizeRole(role)] || Frontdashboard;
-    return <Dashboard username={username} currentUser={currentUser} onLogout={logout} />;
-  }
-
-  // First screen shown: Home page
-  return <HomeLogin onLogin={goToLogin} />;
+  return (
+    <>
+      {showSplash && <SplashAnimation onComplete={() => setShowSplash(false)} />}
+      {page === "login" ? (
+        <Login
+          initialRole={role}
+          initialUsername={username}
+          loginError={error}
+          onLogin={login}
+          onRegister={register}
+        />
+      ) : page === "dashboard" && role ? (
+        (() => {
+          const Dashboard = DASHBOARDS[role] || DASHBOARDS[normalizeRole(role)] || Frontdashboard;
+          return <Dashboard username={username} currentUser={currentUser} onLogout={logout} />;
+        })()
+      ) : (
+        <HomeLogin onLogin={goToLogin} />
+      )}
+    </>
+  );
 }

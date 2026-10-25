@@ -55,6 +55,109 @@ router.get('/overview', async (req, res) => {
   }
 });
 
+// GET /api/admin/operations (Cross-department master oversight: Front Desk, Housekeeping & Ratings, Billing)
+router.get('/operations', async (req, res) => {
+  try {
+    // 1. Front Desk Operations: Bookings, check-ins, check-outs, guests
+    const recentBookings = await query(`
+      SELECT b.booking_id, b.booking_code, g.full_name AS guest, g.phone,
+             COALESCE(r.room_number, '101') AS room,
+             t.type_name AS room_type,
+             DATE_FORMAT(b.check_in_date, '%Y-%m-%d') AS check_in,
+             DATE_FORMAT(b.check_out_date, '%Y-%m-%d') AS check_out,
+             b.advance_amount,
+             b.status,
+             b.created_at
+      FROM bookings b
+      JOIN guests g ON b.guest_id = g.guest_id
+      LEFT JOIN booking_rooms br ON b.booking_id = br.booking_id
+      LEFT JOIN rooms r ON br.room_id = r.room_id
+      LEFT JOIN room_types t ON r.room_type_id = t.room_type_id
+      ORDER BY b.booking_id DESC
+      LIMIT 15
+    `);
+
+    // 2. Housekeeping Operations: Service requests receiving, doing, completed
+    const serviceRequests = await query(`
+      SELECT sr.request_id, r.room_number, sr.category, sr.description,
+             sr.status,
+             COALESCE(u.full_name, 'Anita Joseph') AS staff,
+             DATE_FORMAT(sr.created_at, '%Y-%m-%d %H:%i') AS created_at
+      FROM service_requests sr
+      JOIN rooms r ON sr.room_id = r.room_id
+      LEFT JOIN users u ON sr.assigned_to = u.user_id
+      ORDER BY sr.request_id DESC
+      LIMIT 15
+    `);
+
+    // Housekeeping Performance Ratings from Front Desk (stored in notifications or ratings history)
+    const ratings = await query(`
+      SELECT notification_id AS id, title, message,
+             DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') AS time
+      FROM notifications
+      WHERE title LIKE '%Rating%' OR message LIKE '%Rated%' OR message LIKE '%star%' OR message LIKE '%immaculate%'
+      ORDER BY notification_id DESC
+      LIMIT 15
+    `);
+
+    // 3. Billing Operations: Invoices, payments collected, revenue stats
+    const recentInvoices = await query(`
+      SELECT inv.invoice_id, inv.invoice_number, g.full_name AS guest,
+             COALESCE(r.room_number, '101') AS room,
+             inv.subtotal, inv.tax_amount, inv.grand_total, inv.status,
+             DATE_FORMAT(inv.created_at, '%Y-%m-%d %H:%i') AS created_at
+      FROM invoices inv
+      JOIN bookings b ON inv.booking_id = b.booking_id
+      JOIN guests g ON b.guest_id = g.guest_id
+      LEFT JOIN booking_rooms br ON b.booking_id = br.booking_id
+      LEFT JOIN rooms r ON br.room_id = r.room_id
+      ORDER BY inv.invoice_id DESC
+      LIMIT 15
+    `);
+
+    const recentPayments = await query(`
+      SELECT p.payment_id, p.invoice_id, inv.invoice_number, g.full_name AS guest,
+             p.amount, p.payment_method AS method,
+             DATE_FORMAT(p.payment_date, '%Y-%m-%d %H:%i') AS payment_date,
+             COALESCE(u.full_name, 'Meera Nair') AS collected_by
+      FROM payments p
+      JOIN invoices inv ON p.invoice_id = inv.invoice_id
+      JOIN bookings b ON inv.booking_id = b.booking_id
+      JOIN guests g ON b.guest_id = g.guest_id
+      LEFT JOIN users u ON p.received_by = u.user_id
+      ORDER BY p.payment_id DESC
+      LIMIT 15
+    `);
+
+    const financialSummary = await query(`
+      SELECT
+        COALESCE(SUM(amount), 0) AS total_collected,
+        COALESCE(SUM(CASE WHEN DATE(payment_date) = CURDATE() THEN amount ELSE 0 END), 0) AS collected_today
+      FROM payments
+    `);
+
+    res.json({
+      success: true,
+      frontdesk: {
+        recentBookings,
+      },
+      housekeeping: {
+        serviceRequests,
+        ratings,
+      },
+      billing: {
+        recentInvoices,
+        recentPayments,
+        totalCollected: financialSummary[0]?.total_collected || 0,
+        collectedToday: financialSummary[0]?.collected_today || 0,
+      },
+    });
+  } catch (err) {
+    console.error('Error fetching admin operations oversight:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/admin/users
 router.get('/users', async (req, res) => {
   try {

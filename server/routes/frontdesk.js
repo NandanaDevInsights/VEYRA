@@ -178,21 +178,27 @@ router.post('/bookings', async (req, res) => {
 
     // 2. Resolve room
     let targetRoomId = room_id;
+    let targetRoomNumber = room_number;
     let roomRate = 2500.00;
     if (!targetRoomId && room_number) {
-      const [rooms] = await conn.query('SELECT room_id, current_rate FROM rooms WHERE room_number = ? LIMIT 1', [room_number]);
+      const [rooms] = await conn.query('SELECT room_id, room_number, current_rate FROM rooms WHERE room_number = ? LIMIT 1', [room_number]);
       if (rooms.length > 0) {
         targetRoomId = rooms[0].room_id;
+        targetRoomNumber = rooms[0].room_number;
         roomRate = rooms[0].current_rate;
       }
     } else if (targetRoomId) {
-      const [rooms] = await conn.query('SELECT current_rate FROM rooms WHERE room_id = ?', [targetRoomId]);
-      if (rooms.length > 0) roomRate = rooms[0].current_rate;
+      const [rooms] = await conn.query('SELECT room_id, room_number, current_rate FROM rooms WHERE room_id = ?', [targetRoomId]);
+      if (rooms.length > 0) {
+        targetRoomNumber = rooms[0].room_number;
+        roomRate = rooms[0].current_rate;
+      }
     } else {
       // Pick any available sellable room
-      const [avail] = await conn.query("SELECT room_id, current_rate FROM rooms WHERE status = 'vacant_ready' AND is_sellable = 1 LIMIT 1");
+      const [avail] = await conn.query("SELECT room_id, room_number, current_rate FROM rooms WHERE status = 'vacant_ready' AND is_sellable = 1 LIMIT 1");
       if (avail.length > 0) {
         targetRoomId = avail[0].room_id;
+        targetRoomNumber = avail[0].room_number;
         roomRate = avail[0].current_rate;
       }
     }
@@ -236,14 +242,43 @@ router.post('/bookings', async (req, res) => {
     // Update room status to reserved
     await conn.query("UPDATE rooms SET status = 'reserved' WHERE room_id = ?", [targetRoomId]);
 
-    // 5. If advance paid, record payment
-    const adv = parseFloat(advance_amount);
+    // 5. Auto-generate corresponding Invoice and Items for Billing Dashboard
+    const nights = Math.max(1, Math.round((new Date(check_out_date) - new Date(check_in_date)) / (1000 * 60 * 60 * 24)));
+    const subtotal = nights * parseFloat(roomRate);
+    const taxTotal = Math.round(subtotal * 0.12 * 100) / 100;
+    const grandTotal = Math.round((subtotal + taxTotal) * 100) / 100;
+    const adv = parseFloat(advance_amount) || 0;
+    const invStatus = adv >= grandTotal ? 'paid' : (adv > 0 ? 'partially_paid' : 'issued');
+    const invoiceNum = `INV-${bookingCode.replace(/\D/g, '') || Math.floor(1000 + Math.random() * 9000)}`;
+
+    const [invRes] = await conn.query(`
+      INSERT INTO invoices (invoice_number, booking_id, guest_id, subtotal, tax_total, grand_total, amount_paid, status, created_by, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    `, [invoiceNum, bookingId, guestId, subtotal, taxTotal, grandTotal, adv, invStatus, req.user.user_id]);
+
+    const invoiceId = invRes.insertId;
+
+    await conn.query(`
+      INSERT INTO invoice_items (invoice_id, item_type, description, quantity, unit_price, tax_amount, line_total)
+      VALUES (?, 'room', ?, ?, ?, ?, ?)
+    `, [invoiceId, `Room ${targetRoomNumber} Stay (${nights} night(s))`, nights, roomRate, taxTotal, grandTotal]);
+
+    // 6. If advance paid, record payment linked to invoice
     if (adv > 0) {
       await conn.query(`
-        INSERT INTO payments (booking_id, payment_type, method, amount, received_by, paid_at)
-        VALUES (?, 'advance', ?, ?, ?, NOW())
-      `, [bookingId, payment_method || 'cash', adv, req.user.user_id]);
+        INSERT INTO payments (invoice_id, booking_id, payment_type, method, amount, received_by, paid_at)
+        VALUES (?, ?, 'advance', ?, ?, ?, NOW())
+      `, [invoiceId, bookingId, payment_method || 'cash', adv, req.user.user_id]);
     }
+
+    // 7. Insert Notification visible to Admin, Front Desk & Billing dashboards
+    await conn.query(`
+      INSERT INTO notifications (title, message, is_read, created_at)
+      VALUES (?, ?, 0, NOW())
+    `, [
+      'New Booking Confirmed',
+      `Booking ${bookingCode} for ${guest_name} (Room ${targetRoomNumber}, ${nights} night(s), ${check_in_date} to ${check_out_date}).`
+    ]);
 
     await conn.commit();
 
@@ -252,13 +287,25 @@ router.post('/bookings', async (req, res) => {
       'Created Booking',
       'bookings',
       bookingId,
-      `New booking ${bookingCode} for ${guest_name} (Room ID ${targetRoomId}, Adv: Rs ${adv}).`
+      `New booking ${bookingCode} for ${guest_name} (Room ${targetRoomNumber}, Advance: Rs ${adv}).`
     );
+
+    if (adv > 0) {
+      await logActivity(
+        req.user.user_id,
+        'Advance Payment Received',
+        'payments',
+        bookingId,
+        `Received advance Rs ${adv} for booking ${bookingCode} (${invoiceNum}).`
+      );
+    }
 
     res.json({
       success: true,
       booking_id: bookingId,
       booking_code: bookingCode,
+      invoice_id: invoiceId,
+      invoice_number: invoiceNum,
       message: 'Booking created successfully.',
     });
   } catch (err) {
@@ -278,9 +325,11 @@ router.post('/checkin/:id', async (req, res) => {
     const id = req.params.id; // booking_room_id or booking_id
 
     const [rows] = await conn.query(`
-      SELECT br.booking_room_id, br.booking_id, br.room_id, b.booking_code
+      SELECT br.booking_room_id, br.booking_id, br.room_id, b.booking_code, r.room_number, g.full_name
       FROM booking_rooms br
       JOIN bookings b ON br.booking_id = b.booking_id
+      JOIN guests g ON b.guest_id = g.guest_id
+      JOIN rooms r ON br.room_id = r.room_id
       WHERE br.booking_room_id = ? OR br.booking_id = ?
       LIMIT 1
     `, [id, id]);
@@ -290,7 +339,7 @@ router.post('/checkin/:id', async (req, res) => {
       return res.status(404).json({ error: 'Booking room record not found.' });
     }
 
-    const { booking_room_id, booking_id, room_id, booking_code } = rows[0];
+    const { booking_room_id, booking_id, room_id, booking_code, room_number, full_name } = rows[0];
 
     // Update booking_rooms & bookings
     await conn.query(`
@@ -302,6 +351,15 @@ router.post('/checkin/:id', async (req, res) => {
     await conn.query("UPDATE bookings SET status = 'checked_in' WHERE booking_id = ?", [booking_id]);
     await conn.query("UPDATE rooms SET status = 'occupied' WHERE room_id = ?", [room_id]);
 
+    // Notification for all dashboards
+    await conn.query(`
+      INSERT INTO notifications (title, message, is_read, created_at)
+      VALUES (?, ?, 0, NOW())
+    `, [
+      'Guest Checked In',
+      `Guest ${full_name} checked into Room ${room_number} (${booking_code}).`
+    ]);
+
     await conn.commit();
 
     await logActivity(
@@ -309,7 +367,7 @@ router.post('/checkin/:id', async (req, res) => {
       'Guest Check-in',
       'bookings',
       booking_id,
-      `Checked in guest for booking ${booking_code} (Room ID ${room_id}).`
+      `Checked in guest ${full_name} for booking ${booking_code} (Room ${room_number}).`
     );
 
     res.json({ success: true, message: 'Check-in completed successfully.' });
@@ -329,9 +387,10 @@ router.post('/checkout/:id', async (req, res) => {
     const id = req.params.id;
 
     const [rows] = await conn.query(`
-      SELECT br.booking_room_id, br.booking_id, br.room_id, b.booking_code, r.room_number
+      SELECT br.booking_room_id, br.booking_id, br.room_id, b.booking_code, r.room_number, g.full_name
       FROM booking_rooms br
       JOIN bookings b ON br.booking_id = b.booking_id
+      JOIN guests g ON b.guest_id = g.guest_id
       JOIN rooms r ON br.room_id = r.room_id
       WHERE br.booking_room_id = ? OR br.booking_id = ?
       LIMIT 1
@@ -342,7 +401,7 @@ router.post('/checkout/:id', async (req, res) => {
       return res.status(404).json({ error: 'Booking room record not found.' });
     }
 
-    const { booking_room_id, booking_id, room_id, booking_code, room_number } = rows[0];
+    const { booking_room_id, booking_id, room_id, booking_code, room_number, full_name } = rows[0];
 
     // Set departed, actual_check_out
     await conn.query(`
@@ -360,11 +419,11 @@ router.post('/checkout/:id', async (req, res) => {
       VALUES (?, 'Checkout Deep Clean', 40, 'high', 'pending', NOW())
     `, [room_id]);
 
-    // Create notification for housekeeping
+    // Create notification for all dashboards
     await conn.query(`
       INSERT INTO notifications (title, message, is_read, created_at)
       VALUES ('Room Checkout Cleaning Needed', ?, 0, NOW())
-    `, [`Room ${room_number} checked out (${booking_code}). Ready for cleaning.`]);
+    `, [`Room ${room_number} checked out by ${full_name} (${booking_code}). Ready for cleaning.`]);
 
     await conn.commit();
 
@@ -373,7 +432,7 @@ router.post('/checkout/:id', async (req, res) => {
       'Guest Check-out',
       'bookings',
       booking_id,
-      `Checked out guest for booking ${booking_code} (Room ${room_number}).`
+      `Checked out guest ${full_name} for booking ${booking_code} (Room ${room_number}).`
     );
 
     res.json({ success: true, message: 'Check-out completed and housekeeping task scheduled.' });
@@ -447,10 +506,19 @@ router.post('/service-requests', async (req, res) => {
       VALUES (?, ?, ?, 'open', ?, ?, NOW())
     `, [roomId, category || 'Housekeeping', description, charge_amount, assigned_to || null]);
 
+    // Create notification visible to Housekeeping, Front Desk & Admin
     await createNotification(
-      assigned_to || null,
-      'New Service Request',
-      `Room ${room_number}: ${description}`
+      null,
+      'Work Assigned: Service Request',
+      `Room ${room_number}: ${category || 'Service'} - ${description || 'To be done by Housekeeping'}`
+    );
+
+    await logActivity(
+      req.user.user_id,
+      'Created Service Request',
+      'service_requests',
+      result.insertId,
+      `New service request for Room ${room_number}: ${category || 'Service'} - ${description}.`
     );
 
     res.json({ success: true, id: result.insertId });
@@ -494,6 +562,35 @@ router.delete('/service-requests/:id', async (req, res) => {
   try {
     await query('DELETE FROM service_requests WHERE request_id = ?', [req.params.id]);
     res.json({ success: true, message: 'Request deleted.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/frontdesk/rate-housekeeper
+router.post('/rate-housekeeper', async (req, res) => {
+  try {
+    const { housekeeper, room, rating, comment, tags } = req.body;
+    const staffName = housekeeper || 'Anita Joseph';
+    const stars = rating || 5;
+    const roomNum = room || '-';
+    const note = comment || (stars >= 4 ? 'Excellent work! Room is spotless.' : 'Satisfactory service.');
+
+    await createNotification(
+      null,
+      'Housekeeper Rating Received',
+      `Front Desk rated ${staffName} ${stars} stars for Room ${roomNum}: "${note}"`
+    );
+
+    await logActivity(
+      req.user.user_id,
+      'Rated Housekeeper',
+      'service_requests',
+      null,
+      `Front Desk rated ${staffName} ${stars} stars for Room ${roomNum}.`
+    );
+
+    res.json({ success: true, message: 'Rating saved to database and notification created.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

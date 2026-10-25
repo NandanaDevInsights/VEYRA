@@ -58,7 +58,7 @@
 
 /* Layout */
 .body { display: grid; grid-template-columns: 240px 1fr; flex: 1; }
-.side { background: #FFFFFF; border-right: 1px solid var(--line); padding: 22px 12px; }
+.side { background: #FFFFFF; border-right: 1px solid var(--line); padding: 22px 12px; max-height: calc(100vh - 80px); overflow-y: auto; }
 .side nav { display: grid; gap: 6px; position: sticky; top: 100px; }
 .nav { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: none; border: 0; border-radius: 8px; padding: 11px 14px; font-weight: 600; font-size: 13.5px; color: var(--navy) !important; font-family: 'Inter', sans-serif; transition: all .15s ease; }
 .nav:hover { background: var(--amber-bg) !important; color: var(--navy) !important; }

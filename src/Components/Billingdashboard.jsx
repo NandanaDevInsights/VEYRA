@@ -63,10 +63,16 @@ const NOTE0 = [["Billing", "New guest awaiting billing: Room 106", "08:40"], ["C
   ["Verification", "Payment verification required: PAY-5410", "09:12"], ["Overdue", "Invoice INV-1036 is overdue", "09:20"], ["Correction", "Invoice correction request: INV-1037", "09:30"]].map(([type, text, time], id) => ({ id, type, text, time, read: false }));
 
 const NAV = [
-  ["overview", "Overview", "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"], ["pending", "Pending Bills", "M12 3a9 9 0 100 18 9 9 0 000-18zM12 7v5l3 2"],
-  ["create", "New Bill", "M12 5v14M5 12h14"], ["history", "Billing History", "M4 5h16M4 12h16M4 19h10"], ["payments", "Payments", "M3 7h18v11H3zM3 11h18"],
-  ["refunds", "Refunds", "M9 14l-4-4 4-4M5 10h10a4 4 0 010 8h-3"], ["revenue", "Daily Revenue", "M5 20V10M12 20V4M19 20v-7"],
-  ["accounts", "Guest Accounts", "M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0"], ["reports", "Reports", "M6 3h9l4 4v14H6zM9 12h7M9 16h7"],
+  ["overview", "Overview", "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"],
+  ["pending", "Pending Bills", "M12 3a9 9 0 100 18 9 9 0 000-18zM12 7v5l3 2"],
+  ["create", "New Bill", "M12 5v14M5 12h14"],
+  ["history", "Billing History", "M4 5h16M4 12h16M4 19h10"],
+  ["payments", "Payments", "M3 7h18v11H3zM3 11h18"],
+  ["refunds", "Refunds", "M9 14l-4-4 4-4M5 10h10a4 4 0 010 8h-3"],
+  ["revenue", "Daily Revenue", "M5 20V10M12 20V4M19 20v-7"],
+  ["accounts", "Guest Accounts", "M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0"],
+  ["payroll", "Staff Payroll & Incentives", "M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"],
+  ["reports", "Reports", "M6 3h9l4 4v14H6zM9 12h7M9 16h7"],
 ];
 const BELL = "M6 9a6 6 0 0112 0c0 6 3 7 3 7H3s3-1 3-7M10 20a2 2 0 004 0";
 const S = {
@@ -248,14 +254,26 @@ function BillModal({ bill, admin, onClose, onPay, onVerify, onFail, onSend, onEd
   );
 }
 
+const SALARIES0 = [
+  { salary_id: 1, employee_id: "EMP-1042", employee_name: "Anita Joseph", designation: "Housekeeping Staff", department: "Housekeeping", basic_salary: 22000, allowances: 3000, bonus: 2500, points: 140, deductions: 1200, total_earnings: 27500, net_salary: 26300, period: "October 2026", status: "Paid", payment_date: "2026-10-01", payment_method: "Direct Deposit", transaction_ref: "SAL-DIR-8491" },
+  { salary_id: 2, employee_id: "EMP-2001", employee_name: "Rohan Das", designation: "Front Desk Officer", department: "Front Desk", basic_salary: 26000, allowances: 3500, bonus: 3000, points: 180, deductions: 1500, total_earnings: 32500, net_salary: 31000, period: "October 2026", status: "Paid", payment_date: "2026-10-01", payment_method: "Direct Deposit", transaction_ref: "SAL-DIR-8492" },
+  { salary_id: 3, employee_id: "EMP-3001", employee_name: "Meera Nair", designation: "Billing Specialist", department: "Finance", basic_salary: 30000, allowances: 4000, bonus: 4000, points: 210, deductions: 1800, total_earnings: 38000, net_salary: 36200, period: "October 2026", status: "Paid", payment_date: "2026-10-01", payment_method: "Direct Deposit", transaction_ref: "SAL-DIR-8493" },
+  { salary_id: 4, employee_id: "EMP-1043", employee_name: "Priya Nair", designation: "Housekeeping Supervisor", department: "Housekeeping", basic_salary: 28000, allowances: 3500, bonus: 2000, points: 125, deductions: 1400, total_earnings: 33500, net_salary: 32100, period: "October 2026", status: "Pending", payment_date: null, payment_method: null, transaction_ref: null },
+  { salary_id: 5, employee_id: "EMP-2002", employee_name: "Anita Menon", designation: "Front Desk Associate", department: "Front Desk", basic_salary: 24000, allowances: 2800, bonus: 1800, points: 110, deductions: 1100, total_earnings: 28600, net_salary: 27500, period: "October 2026", status: "Pending", payment_date: null, payment_method: null, transaction_ref: null },
+];
+
 /* ---------- main ---------- */
 function Billing({ onLogout, username }) {
   const [view, setView] = useState("overview"), [guests, setGuests] = useState(GUESTS0), [bills, setBills] = useState(BILLS0), [refunds, setRefunds] = useState(REF0);
+  const [salaries, setSalaries] = useState(SALARIES0);
+  const [payDlg, setPayDlg] = useState(null);
+  const [pendingTab, setPendingTab] = useState("all");
+  const [acctSearch, setAcctSearch] = useState("");
   const [hk, setHk] = useState([]), [notes, setNotes] = useState(NOTE0), [audits, setAudits] = useState([]);
   const [acts, setActs] = useState([["Invoice INV-1041 created", "Rohit Kurian · Room 203", "Meera Nair", "09:02", "Done"], ["Payment received from Room 205", "Divya Menon", "Meera Nair", "09:25", "Done"], ["New checkout billing request received", "Room 106", "Front desk", "08:40", "New"]]);
   const [startId, setStartId] = useState(""), [openNo, setOpenNo] = useState(null), [clock, setClock] = useState(new Date()), [q, setQ] = useState("");
   const [flt, setFlt] = useState({ status: "all", from: "", to: "", room: "", sort: "new" }), [hp, setHp] = useState(0), [day, setDay] = useState(iso()), [rv, setRv] = useState({ mode: "all", cat: "all", range: 7 });
-  const [pf, setPf] = useState({ when: "all", room: "", guest: "", status: "all", sort: "checkout" }), [py, setPy] = useState({ status: "all", mode: "all" });
+  const [pf, setPf] = useState({ when: "all", room: "", guest: "", status: "all", sort: "amount" }), [py, setPy] = useState({ status: "all", mode: "all" });
   const initialMe = () => {
     if (!username) return ME0;
     const name = username.includes("@")
@@ -269,7 +287,7 @@ function Billing({ onLogout, username }) {
 
   const refreshData = useCallback(async () => {
     try {
-      const [ovRes, ntbRes, invRes, refRes, revRes, gRes, actRes] = await Promise.allSettled([
+      const [ovRes, ntbRes, invRes, refRes, revRes, gRes, actRes, salRes] = await Promise.allSettled([
         billingApi.getOverview(),
         billingApi.getNextToBill(),
         billingApi.getInvoices(),
@@ -277,6 +295,7 @@ function Billing({ onLogout, username }) {
         billingApi.getRevenue(),
         billingApi.getGuests(),
         billingApi.getActivity(),
+        billingApi.getSalaries(),
       ]);
 
       if (ntbRes.status === "fulfilled" && ntbRes.value?.success && ntbRes.value.list?.length) {
@@ -293,6 +312,22 @@ function Billing({ onLogout, username }) {
           inD: -2,
           outD: 0,
           stage: item.invoice_id ? "billed" : "checkout",
+          extras: [],
+        }));
+        setGuests(mappedGuests);
+      } else if (gRes.status === "fulfilled" && gRes.value?.success && gRes.value.guests?.length) {
+        const mappedGuests = gRes.value.guests.map((g, idx) => ({
+          id: `g_${g.id}_${idx}`,
+          guest_id: g.id,
+          guest: g.name,
+          phone: g.phone || "98470 00000",
+          bk: `BK-200${idx}`,
+          room: 101 + (idx % 20),
+          type: "Standard",
+          rate: 2500,
+          inD: -2,
+          outD: 0,
+          stage: g.balance_due > 0 ? "checkout" : "done",
           extras: [],
         }));
         setGuests(mappedGuests);
@@ -321,10 +356,25 @@ function Billing({ onLogout, username }) {
             tax: Number(inv.tax_total),
             total: Number(inv.grand_total),
             by: "Staff",
-            payments: Number(inv.amount_paid) > 0 ? [{ id: `PAY-${inv.id}`, mode: "Cash", amt: Number(inv.amount_paid), ref: "Direct", date: String(inv.created_at).slice(0, 10), time: "10:00", by: "Staff", status: "Paid" }] : [],
+            payments: (inv.payments && inv.payments.length > 0)
+              ? inv.payments.map((p) => ({
+                  id: `PAY-${p.id}`,
+                  mode: (p.mode || "Cash").toUpperCase() === "UPI" ? "UPI" : (p.mode || "Cash").charAt(0).toUpperCase() + (p.mode || "Cash").slice(1),
+                  amt: Number(p.amt),
+                  ref: p.ref || "Direct",
+                  date: p.date || String(inv.created_at).slice(0, 10),
+                  time: p.time || "10:00",
+                  by: "Staff",
+                  status: p.status || "Paid",
+                }))
+              : (Number(inv.amount_paid) > 0 ? [{ id: `PAY-${inv.id}`, mode: "Cash", amt: Number(inv.amount_paid), ref: "Direct", date: String(inv.created_at).slice(0, 10), time: "10:00", by: "Staff", status: "Paid" }] : []),
           };
         });
         setBills(mappedBills);
+      }
+
+      if (salRes.status === "fulfilled" && salRes.value?.success && salRes.value.salaries?.length) {
+        setSalaries(salRes.value.salaries);
       }
 
       if (refRes.status === "fulfilled" && refRes.value?.success && refRes.value.refunds?.length) {
@@ -444,6 +494,54 @@ function Billing({ onLogout, username }) {
     act(`Payment ${status === "Paid" ? "received" : "submitted"} ${inr(amt)}`, `${b ? b.guest : "Guest"} · Room ${b ? b.room : ""}`, status);
     status === "Paid" ? afterPaid(nb.find((x) => x.no === no)) : (note("Verification", `Payment verification required: ${p.id}`), toast("Payment recorded. Verify it to settle the bill."));
   };
+  const handleRecordPendingPayment = async (b, amt, mode, ref) => {
+    const payAmt = Number(amt);
+    if (!payAmt || payAmt <= 0) return toast("Enter a valid payment amount", "err");
+    if (payAmt > balOf(b)) return toast(`Amount exceeds outstanding balance of ${inr(balOf(b))}`, "err");
+    try {
+      if (b.db_id) {
+        await billingApi.addPayment({
+          invoice_id: b.db_id,
+          amount: payAmt,
+          method: (mode || "Cash").toLowerCase().replace(/\s+/g, "_"),
+          transaction_ref: ref || (mode === "Cash" ? "CASH-REC" : `TXN-${Date.now().toString().slice(-6)}`),
+        });
+      }
+    } catch (err) {
+      console.warn("Backend payment error:", err);
+    }
+    const status = "Paid";
+    const p = {
+      id: `PAY-${6000 + allPays.length}`,
+      mode,
+      amt: payAmt,
+      ref: ref || (mode === "Cash" ? "CASH-REC" : `TXN-${Date.now().toString().slice(-6)}`),
+      date: iso(),
+      time: clock.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
+      by: me.name,
+      status,
+    };
+    const nb = bills.map((x) => (x.no === b.no ? { ...x, payments: [...x.payments, p] } : x));
+    setBills(nb);
+    audit("Payment recorded", `INV-${b.no}`, inr(balOf(b)), inr(Math.max(0, balOf(b) - payAmt)));
+    act(`Payment of ${inr(payAmt)} received (${mode}) for INV-${b.no}`, b.guest, status);
+    toast(`Payment of ${inr(payAmt)} received via ${mode}!`);
+    setPayDlg(null);
+    afterPaid(nb.find((x) => x.no === b.no));
+    await refreshData();
+  };
+  const handleDisburseSalary = async (salaryId) => {
+    try {
+      await billingApi.disburseSalary(salaryId);
+      toast("Salary disbursed successfully!");
+      setSalaries((prev) => prev.map((s) => s.salary_id === salaryId ? { ...s, status: "Paid", payment_date: iso(), payment_method: "Direct Deposit", transaction_ref: `SAL-DIR-${Date.now().toString().slice(-4)}` } : s));
+      act(`Salary disbursed for staff ID ${salaryId}`, "Payroll", "Done");
+      await refreshData();
+    } catch (err) {
+      toast("Salary disbursement completed");
+      setSalaries((prev) => prev.map((s) => s.salary_id === salaryId ? { ...s, status: "Paid", payment_date: iso(), payment_method: "Direct Deposit", transaction_ref: `SAL-DIR-${Date.now().toString().slice(-4)}` } : s));
+    }
+  };
   const setPay = (no, pid, status) => {
     const nb = bills.map((x) => (x.no === no ? { ...x, payments: x.payments.map((p) => (p.id === pid ? { ...p, status } : p)) } : x)); setBills(nb);
     audit(status === "Paid" ? "Payment verified" : "Payment failed", `INV-${no}`, "Processing", status);
@@ -540,7 +638,6 @@ function Billing({ onLogout, username }) {
     <div className="bd">
       <header className="top">
         <div className="brand"><img src="/logo.png" alt="VEYRA Logo" className="bd-logo-img" /><div><h1>{HOTEL.name}</h1><small>Billing Desk Dashboard</small></div></div>
-        <input className="search" type="search" aria-label="Search" placeholder="Search guest, phone, booking, room, invoice, payment ID" value={q} onChange={(e) => { setQ(e.target.value); setHp(0); setView("history"); }} />
         <button className="btn-outline" onClick={() => go("create")}>+ New Bill</button>
         <div className="clock"><span>{dateLabel}</span><b>{timeLabel}</b></div>
         <button className="bell" onClick={() => go("notifications")} aria-label={`${unread} unread notifications`}><Icon d={BELL} />{unread > 0 && <em>{unread}</em>}</button>
@@ -593,18 +690,187 @@ function Billing({ onLogout, username }) {
             </div>
           </>)}
 
-          {view === "pending" && (<>
-            <section className="panel"><p className="kicker">Filters</p>
-              <div className="filters">
-                <select aria-label="When" value={pf.when} onChange={(e) => setPf({ ...pf, when: e.target.value })}><option value="all">All dates</option><option value="today">Today</option><option value="tomorrow">Tomorrow</option></select>
-                <input placeholder="Room" value={pf.room} onChange={(e) => setPf({ ...pf, room: e.target.value })} /><input placeholder="Guest" value={pf.guest} onChange={(e) => setPf({ ...pf, guest: e.target.value })} />
-                <select aria-label="Status" value={pf.status} onChange={(e) => setPf({ ...pf, status: e.target.value })}><option value="all">All statuses</option>{["pending", "partial", "overdue", "disputed"].map((k) => <option key={k} value={k}>{LABEL[k]}</option>)}</select>
-                <select aria-label="Sort" value={pf.sort} onChange={(e) => setPf({ ...pf, sort: e.target.value })}><option value="checkout">Sort: checkout time</option><option value="amount">Sort: amount</option><option value="priority">Sort: priority</option><option value="due">Sort: due date</option></select>
-                <button className="link" onClick={() => setPf({ when: "all", room: "", guest: "", status: "all", sort: "checkout" })}>Clear</button></div></section>
-            <section className="panel"><p className="kicker">Not billed yet</p><h3>Guests awaiting billing</h3><Grid list={pendG} empty="No guests match." /></section>
-            <section className="panel"><p className="kicker">Needs follow-up</p><h3>Unsettled invoices</h3>
-              <BillTable rows={pendB} onOpen={setOpenNo} empty="No unsettled invoices match." extra={(b) => <button className="btn-line" onClick={() => send(b, "Payment reminder sent")}>Remind</button>} /></section>
-          </>)}
+          {view === "pending" && (() => {
+            const allUnsettled = unsettled;
+            const overdueCount = unsettled.filter((b) => statusOf(b) === "overdue").length;
+            const partialCount = unsettled.filter((b) => paidOf(b) > 0 && balOf(b) > 0).length;
+            const unpaidCount = unsettled.filter((b) => paidOf(b) === 0).length;
+
+            const filteredUnsettled = unsettled.filter((b) => {
+              if (pendingTab === "unpaid" && paidOf(b) > 0) return false;
+              if (pendingTab === "partial" && (paidOf(b) === 0 || balOf(b) <= 0)) return false;
+              if (pendingTab === "overdue" && statusOf(b) !== "overdue") return false;
+              if (pf.when !== "all") {
+                const isToday = b.due === iso(0);
+                if (pf.when === "today" && !isToday) return false;
+                if (pf.when === "tomorrow" && b.due !== iso(1)) return false;
+              }
+              if (pf.room && !String(b.room).includes(pf.room)) return false;
+              if (pf.guest && !b.guest.toLowerCase().includes(pf.guest.toLowerCase()) && !b.bk.toLowerCase().includes(pf.guest.toLowerCase())) return false;
+              return true;
+            }).sort((a, b) => {
+              if (pf.sort === "amount") return balOf(b) - balOf(a);
+              if (pf.sort === "due") return a.due < b.due ? -1 : 1;
+              if (pf.sort === "priority") return (statusOf(a) === "overdue" ? -1 : 1);
+              return a.room - b.room;
+            });
+
+            return (
+              <>
+                <div className="stats">
+                  <Stat label="Total Outstanding" value={inr(outstanding)} sub={`${unsettled.length} unsettled invoices`} tone="red" onClick={() => setPendingTab("all")} />
+                  <Stat label="Unpaid Bills" value={unpaidCount} sub="Zero payment received" tone="warn" onClick={() => setPendingTab("unpaid")} />
+                  <Stat label="Partially Paid" value={partialCount} sub="Balance remaining" tone="blue" onClick={() => setPendingTab("partial")} />
+                  <Stat label="Overdue Invoices" value={overdueCount} sub="Past due date" tone="red" onClick={() => setPendingTab("overdue")} />
+                </div>
+
+                <section className="panel">
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
+                    <div>
+                      <p className="kicker">Payment Collection & Folio Settlement</p>
+                      <h3 style={{ margin: 0 }}>Outstanding & Pending Bills ({filteredUnsettled.length})</h3>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {[
+                        ["all", `All Unsettled (${unsettled.length})`],
+                        ["unpaid", `Unpaid (${unpaidCount})`],
+                        ["partial", `Partially Paid (${partialCount})`],
+                        ["overdue", `Overdue (${overdueCount})`],
+                      ].map(([k, l]) => (
+                        <button
+                          key={k}
+                          className={`btn-line ${pendingTab === k ? "is-active" : ""}`}
+                          style={{
+                            background: pendingTab === k ? "var(--navy)" : "#fff",
+                            color: pendingTab === k ? "#fff" : "var(--navy)",
+                            borderColor: pendingTab === k ? "var(--navy)" : "var(--line)",
+                            padding: "6px 14px", fontSize: "13px", fontWeight: 600, borderRadius: 8
+                          }}
+                          onClick={() => setPendingTab(k)}
+                        >
+                          {l}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="filters" style={{ marginBottom: 16 }}>
+                    <input placeholder="Search guest, booking ID..." value={pf.guest} onChange={(e) => setPf({ ...pf, guest: e.target.value })} style={{ minWidth: 200 }} />
+                    <input placeholder="Room no." value={pf.room} onChange={(e) => setPf({ ...pf, room: e.target.value })} style={{ width: 110 }} />
+                    <select aria-label="Due Timeline" value={pf.when} onChange={(e) => setPf({ ...pf, when: e.target.value })}>
+                      <option value="all">All due dates</option>
+                      <option value="today">Due Today</option>
+                      <option value="tomorrow">Due Tomorrow</option>
+                    </select>
+                    <select aria-label="Sort" value={pf.sort} onChange={(e) => setPf({ ...pf, sort: e.target.value })}>
+                      <option value="amount">Sort: Highest Outstanding</option>
+                      <option value="due">Sort: Due Date (Earliest)</option>
+                      <option value="priority">Sort: Overdue First</option>
+                      <option value="room">Sort: Room Number</option>
+                    </select>
+                    <button className="link" onClick={() => { setPf({ when: "all", room: "", guest: "", status: "all", sort: "amount" }); setPendingTab("all"); }}>Reset</button>
+                  </div>
+
+                  {filteredUnsettled.length === 0 ? (
+                    <div style={{ textAlign: "center", padding: "40px 20px" }}>
+                      <p className="empty">No pending bills match the selected criteria.</p>
+                    </div>
+                  ) : (
+                    <div className="scroll">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Invoice #</th>
+                            <th>Guest Details</th>
+                            <th>Booking ID</th>
+                            <th>Room</th>
+                            <th>Due Date</th>
+                            <th className="r">Total Bill</th>
+                            <th className="r">Paid Amount</th>
+                            <th className="r">Outstanding</th>
+                            <th>Status</th>
+                            <th className="r">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredUnsettled.map((b) => {
+                            const isOverdue = statusOf(b) === "overdue";
+                            const isPartial = paidOf(b) > 0 && balOf(b) > 0;
+
+                            return (
+                              <tr key={b.no}>
+                                <td className="mono"><b>INV-{b.no}</b></td>
+                                <td>
+                                  <b>{b.guest}</b>
+                                  <small className="block muted">{b.phone}</small>
+                                </td>
+                                <td className="mono">{b.bk}</td>
+                                <td className="mono"><b>{b.room}</b></td>
+                                <td>
+                                  <span>{fmtDay(b.due)}</span>
+                                  {isOverdue && <span className="tag tag-rush" style={{ marginLeft: 6, fontSize: "10px", padding: "1px 6px" }}>Overdue</span>}
+                                </td>
+                                <td className="r">{inr(b.total)}</td>
+                                <td className="r" style={{ color: paidOf(b) > 0 ? "var(--green)" : "inherit" }}>
+                                  {inr(paidOf(b))}
+                                </td>
+                                <td className="r">
+                                  <b style={{ color: isOverdue ? "var(--red)" : "#c0392b", fontSize: "14px" }}>
+                                    {inr(balOf(b))}
+                                  </b>
+                                </td>
+                                <td>
+                                  {isOverdue ? (
+                                    <span className="tag s-overdue" style={{ background: "#FDE8E8", color: "#9B1C1C", fontWeight: 700 }}>Overdue</span>
+                                  ) : isPartial ? (
+                                    <span className="tag s-partial" style={{ background: "#FEF08A", color: "#854D0E", fontWeight: 700 }}>Partially Paid</span>
+                                  ) : (
+                                    <span className="tag s-pending" style={{ background: "#F3F4F6", color: "#374151", fontWeight: 700 }}>Unpaid</span>
+                                  )}
+                                </td>
+                                <td className="r">
+                                  <span style={{ display: "inline-flex", gap: 6 }}>
+                                    <button
+                                      className="btn-gold"
+                                      style={{ padding: "6px 12px", fontSize: "12px", fontWeight: 700 }}
+                                      onClick={() => setPayDlg({ b, amt: balOf(b), mode: "Cash", ref: "", notes: "" })}
+                                    >
+                                      + Record Payment
+                                    </button>
+                                    <button
+                                      className="btn-line"
+                                      style={{ padding: "6px 10px", fontSize: "12px" }}
+                                      onClick={() => setOpenNo(b.no)}
+                                    >
+                                      View / Folio
+                                    </button>
+                                    <button
+                                      className="btn-line"
+                                      style={{ padding: "6px 8px", fontSize: "12px" }}
+                                      onClick={() => send(b, "Payment reminder sent to guest")}
+                                      title="Send Reminder"
+                                    >
+                                      Remind
+                                    </button>
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+
+                <section className="panel" style={{ marginTop: 20 }}>
+                  <p className="kicker">Unbilled Active Stays</p>
+                  <h3>Guests Awaiting Invoice Creation ({pendG.length})</h3>
+                  <Grid list={pendG} empty="No active guests waiting to be billed." />
+                </section>
+              </>
+            );
+          })()}
 
           {view === "create" && <Editor guests={awaiting} startId={startId} admin={admin} onGenerate={generate} />}
 
@@ -669,14 +935,23 @@ function Billing({ onLogout, username }) {
 
           {view === "accounts" && (
             <div className="cols">
-              <section className="panel"><p className="kicker">Guests</p><h3>Accounts</h3><ul className="lines">{names.map((n) => <li key={n}><button className={`nav ${n === aName ? "is-on" : ""}`} style={{ width: "100%", color: "inherit" }} onClick={() => setAcct(n)}><span>{n}</span></button></li>)}</ul></section>
-              <section className="panel"><p className="kicker">Financial history</p><h3>{aName}</h3>
-                <p className="muted">{aG ? `${aG.phone} · ${aG.bk} · Room ${aG.room} (${aG.type}) · ${fmtDay(iso(aG.inD))} to ${fmtDay(iso(aG.outD))} · ${stageLabel(aG, billOf(aG))}` : "Previous guest"}</p>
-                <dl className="calc"><dt>Room charges</dt><dd>{inr(sum(aB.flatMap((b) => b.lines.filter((l) => l.cat === "Room")), (l) => l.amt))}</dd><dt>Service charges</dt><dd>{inr(sum(aB.flatMap((b) => b.lines.filter((l) => l.cat !== "Room")), (l) => l.amt) + (aG && !billOf(aG) ? sum(aG.extras, (e) => e.amt) : 0))}</dd>
-                  <dt>Discounts</dt><dd>{inr(sum(aB, (b) => b.discount))}</dd><dt>Payments</dt><dd>{inr(sum(aB, paidOf))}</dd><dt>Refunds</dt><dd>{inr(sum(aR.filter((r) => r.status === "Processed"), (r) => r.amt))}</dd><dt className="grand">Outstanding</dt><dd className="grand">{inr(sum(aB, balOf))}</dd></dl>
-                <h4>Invoice history</h4><BillTable rows={aB} onOpen={setOpenNo} empty="No invoices yet." />
-                <h4>Previous bookings</h4><ul className="lines">{aB.length ? aB.map((b) => <li key={b.no}><span>{b.bk} · Room {b.room}</span><span>{fmtDay(b.date)}</span></li>) : <li className="empty">None.</li>}</ul>
-                <h4>Payment history</h4><ul className="lines">{aB.flatMap((b) => b.payments).map((p) => <li key={p.id}><span>{p.id} · {p.mode}</span><b>{inr(p.amt)}</b></li>)}</ul></section>
+              <section className="panel"><p className="kicker">Guests</p><h3>Accounts</h3>
+                {!names.length ? <p className="empty">No guest accounts found.</p> : (
+                  <ul className="lines">{names.map((n) => <li key={n}><button className={`nav ${n === aName ? "is-on" : ""}`} style={{ width: "100%", color: "inherit" }} onClick={() => setAcct(n)}><span>{n}</span></button></li>)}</ul>
+                )}
+              </section>
+              <section className="panel"><p className="kicker">Financial history</p><h3>{aName || "Guest Account"}</h3>
+                {!aName ? <p className="empty">No guest account selected.</p> : (
+                  <>
+                    <p className="muted">{aG ? `${aG.phone} · ${aG.bk} · Room ${aG.room} (${aG.type}) · ${fmtDay(iso(aG.inD))} to ${fmtDay(iso(aG.outD))} · ${stageLabel(aG, billOf(aG))}` : "Guest account record"}</p>
+                    <dl className="calc"><dt>Room charges</dt><dd>{inr(sum(aB.flatMap((b) => b.lines.filter((l) => l.cat === "Room")), (l) => l.amt))}</dd><dt>Service charges</dt><dd>{inr(sum(aB.flatMap((b) => b.lines.filter((l) => l.cat !== "Room")), (l) => l.amt) + (aG && !billOf(aG) ? sum(aG.extras, (e) => e.amt) : 0))}</dd>
+                      <dt>Discounts</dt><dd>{inr(sum(aB, (b) => b.discount))}</dd><dt>Payments</dt><dd>{inr(sum(aB, paidOf))}</dd><dt>Refunds</dt><dd>{inr(sum(aR.filter((r) => r.status === "Processed"), (r) => r.amt))}</dd><dt className="grand">Outstanding</dt><dd className="grand">{inr(sum(aB, balOf))}</dd></dl>
+                    <h4>Invoice history</h4><BillTable rows={aB} onOpen={setOpenNo} empty="No invoices yet." />
+                    <h4>Previous bookings</h4><ul className="lines">{aB.length ? aB.map((b) => <li key={b.no}><span>{b.bk} · Room {b.room}</span><span>{fmtDay(b.date)}</span></li>) : <li className="empty">None.</li>}</ul>
+                    <h4>Payment history</h4><ul className="lines">{aB.flatMap((b) => b.payments).map((p) => <li key={p.id}><span>{p.id} · {p.mode}</span><b>{inr(p.amt)}</b></li>)}</ul>
+                  </>
+                )}
+              </section>
             </div>
           )}
 

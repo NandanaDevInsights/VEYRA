@@ -124,17 +124,36 @@ export default function LoginPage({ onLogin, onRegister, initialRole, initialUse
 
   return (
     <div className="lp">
+      {/* Decorative Gold Filigree Corner Accents */}
+      <svg className="lp-filigree lp-filigree-tl" viewBox="0 0 320 320" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M 0,280 C 150,280 280,150 280,0" stroke="#C9A227" strokeWidth="1.5" strokeOpacity="0.32" />
+        <path d="M 0,230 C 130,230 230,130 230,0" stroke="#C9A227" strokeWidth="1" strokeOpacity="0.22" />
+        <path d="M 0,160 C 90,160 160,90 160,0" stroke="#E4C766" strokeWidth="1.5" strokeOpacity="0.4" />
+        <circle cx="160" cy="0" r="3.5" fill="#D4AF37" fillOpacity="0.65" />
+        <circle cx="0" cy="160" r="3.5" fill="#D4AF37" fillOpacity="0.65" />
+        <path d="M 0,90 C 50,90 90,50 90,0" stroke="#C9A227" strokeWidth="1" strokeOpacity="0.25" />
+      </svg>
+      <svg className="lp-filigree lp-filigree-br" viewBox="0 0 320 320" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M 320,40 C 170,40 40,170 40,320" stroke="#C9A227" strokeWidth="1.5" strokeOpacity="0.32" />
+        <path d="M 320,90 C 190,90 90,190 90,320" stroke="#C9A227" strokeWidth="1" strokeOpacity="0.22" />
+        <path d="M 320,160 C 230,160 160,230 160,320" stroke="#E4C766" strokeWidth="1.5" strokeOpacity="0.4" />
+        <circle cx="160" cy="320" r="3.5" fill="#D4AF37" fillOpacity="0.65" />
+        <circle cx="320" cy="160" r="3.5" fill="#D4AF37" fillOpacity="0.65" />
+        <path d="M 320,230 C 270,230 230,270 230,320" stroke="#C9A227" strokeWidth="1" strokeOpacity="0.25" />
+      </svg>
+
       <div className="lp-card">
-        <header className="lp-header">
-          <HotelArt />
-          <div className="lp-header-content">
-            <div className="lp-mark">
-              <img src="/logo.png" alt="VEYRA Logo" className="lp-logo-img" />
-            </div>
-            <h1 className="lp-name">VEYRA</h1>
-            <p className="lp-tag">Staff management portal</p>
+        <div className="lp-brand-top">
+          <div className="lp-logo-glow">
+            <img src="/logo.png" alt="VEYRA Logo" className="lp-logo-img" />
           </div>
-        </header>
+          <h1 className="lp-name">VEYRA</h1>
+          <div className="lp-divider-flourish">
+            <span className="lp-flourish-line" />
+            <span className="lp-flourish-star">✦</span>
+            <span className="lp-flourish-line" />
+          </div>
+        </div>
 
         <form className="lp-form" onSubmit={handleSubmit} noValidate>
           {/* Mode Switcher Tabs */}
@@ -283,7 +302,7 @@ export default function LoginPage({ onLogin, onRegister, initialRole, initialUse
           )}
 
           <button type="submit" className="lp-submit" disabled={loading}>
-            {loading ? "Processing..." : mode === "register" ? "Register & Sign in" : "Sign in"}
+            {loading ? "Processing..." : mode === "register" ? "Register & Sign in →" : "Sign in →"}
           </button>
 
           <p className="lp-switch-text">

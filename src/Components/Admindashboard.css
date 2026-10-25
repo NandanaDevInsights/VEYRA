@@ -16,7 +16,7 @@
 .ad h1, .ad h2, .ad h3 { font-family: "Playfair Display", serif; margin: 0; color: var(--navy-d); }
 
 /* sidebar */
-.ad-side { background: var(--navy-d); color: #fff; padding: 26px 16px; position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; border-right: 2px solid var(--gold); }
+.ad-side { background: var(--navy-d); color: #fff; padding: 26px 16px; position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; border-right: 2px solid var(--gold); overflow-y: auto; }
 .ad-logo { display: flex; gap: 12px; align-items: center; padding: 0 8px 26px; }
 .ad-logo-img { width: 40px; height: 40px; object-fit: contain; }
 .ad-logo i { width: 40px; height: 40px; border-radius: 50%; border: 2px solid var(--gold); display: grid; place-items: center; font: 700 17px "Playfair Display", serif; color: var(--gold-l); font-style: normal; }
@@ -708,4 +708,382 @@
   accent-color: var(--gold);
   cursor: pointer;
   flex: none;
+}
+
+/* =========================================================================
+   VEYRA LUXURY ADMIN DASHBOARD - CROSS-DEPARTMENT OPERATIONS & METRICS
+   ========================================================================= */
+
+/* Operations Monitor Panel */
+.ad-ops-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  border-top: 4px solid var(--gold);
+  box-shadow: 0 4px 20px rgba(27, 42, 78, 0.08);
+}
+
+.ad-ops-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1.5px solid var(--line);
+}
+
+.ad-ops-tabs {
+  display: flex;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  padding: 4px;
+  border-radius: 12px;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.ad-ops-tab {
+  border: none;
+  background: transparent;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ad-ops-tab.active {
+  background: var(--navy);
+  color: var(--gold-l);
+  box-shadow: 0 2px 8px rgba(18, 28, 56, 0.2);
+}
+
+.ad-ops-tab:hover:not(.active) {
+  color: var(--navy);
+  background: rgba(255, 255, 255, 0.6);
+}
+
+/* Department Section Containers */
+.ad-dept-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: #FCFBF9;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 20px 22px;
+}
+
+.ad-dept-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ad-dept-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--navy-d);
+  margin: 0;
+}
+
+.ad-dept-sub {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.ad-room-pill {
+  display: inline-block;
+  background: #E8EFF4;
+  color: var(--navy);
+  font-weight: 700;
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid #CFDEE8;
+}
+.ad-room-pill.sm {
+  font-size: 11.5px;
+  padding: 2px 8px;
+}
+
+/* Housekeeping Operations Grid */
+.ad-hk-ops-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  gap: 20px;
+}
+@media (max-width: 900px) {
+  .ad-hk-ops-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ad-hk-box {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 18px;
+  box-shadow: 0 1px 4px rgba(27, 42, 78, 0.04);
+}
+
+.ad-hk-subhead {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--navy-d);
+  margin: 0 0 14px;
+}
+
+.ad-hk-req-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ad-hk-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.ad-hk-item-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Housekeeping Staff Ratings Stream */
+.ad-rating-kpi {
+  background: #FEF9EB;
+  border: 1px solid var(--gold);
+  color: var(--gold-t);
+  font-weight: 700;
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 99px;
+}
+
+.ad-ratings-stream {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ad-rating-card {
+  background: #FFFDF9;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--gold);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ad-rating-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.ad-stars {
+  color: var(--gold);
+  font-size: 15px;
+  letter-spacing: 2px;
+  font-weight: 700;
+}
+
+.ad-rating-comment {
+  font-size: 13px;
+  color: #333330;
+  font-style: italic;
+  margin: 2px 0;
+  line-height: 1.4;
+}
+
+.ad-rating-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+}
+
+.ad-rating-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ad-tag-chip {
+  background: #E8EFF4;
+  color: var(--navy);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 99px;
+}
+
+/* Billing Desk Monitor */
+.ad-billing-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+@media (max-width: 768px) {
+  .ad-billing-kpis {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ad-bkpi-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--green);
+  border-radius: 14px;
+  padding: 16px 18px;
+  box-shadow: 0 1px 4px rgba(27, 42, 78, 0.04);
+}
+.ad-bkpi-card.gold {
+  border-top-color: var(--gold);
+}
+.ad-bkpi-card.blue {
+  border-top-color: var(--blue);
+}
+.ad-bkpi-card small {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+.ad-bkpi-card b {
+  font-size: 22px;
+  color: var(--navy-d);
+  font-family: 'Playfair Display', serif;
+}
+
+.ad-billing-tables-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+@media (max-width: 900px) {
+  .ad-billing-tables-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ad-table-caption {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--navy);
+  padding: 12px 14px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+}
+
+.ad-pay-method {
+  font-size: 11px;
+  font-weight: 700;
+  background: #E8EFF4;
+  color: var(--navy);
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+
+/* Records Executive Section */
+.ad-records-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.ad-records-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+@media (max-width: 768px) {
+  .ad-records-metrics {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ad-rec-metric {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--navy);
+  border-radius: 14px;
+  padding: 18px 20px;
+  box-shadow: var(--sh);
+}
+.ad-rec-metric.gold {
+  border-top-color: var(--gold);
+}
+.ad-rec-metric.green {
+  border-top-color: var(--green);
+}
+.ad-rec-metric small {
+  display: block;
+  font-size: 12.5px;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+.ad-rec-metric b {
+  font-size: 26px;
+  color: var(--navy-d);
+  font-family: 'Playfair Display', serif;
+}
+
+.ad-records-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ad-filter-chip {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 99px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.ad-filter-chip.on {
+  background: var(--navy);
+  border-color: var(--navy);
+  color: var(--gold-l);
+}
+.ad-filter-chip:hover:not(.on) {
+  border-color: var(--gold);
+  color: var(--navy);
+}
+
+.ad-records-search input {
+  height: 38px;
+  width: 280px;
+  max-width: 100%;
+  padding: 0 14px;
+  font-size: 13px;
 }

@@ -172,9 +172,10 @@ const INITIAL_NOTIFICATIONS = [
   { id: 3, text: "New booking pending for 2 nights - Rohan Das.", priority: "Info", type: "booking", link: "overview", ts: mins(60), read: false },
 ];
 const INITIAL_REQUESTS = [
-  { id: 1, room: "202", type: "Extra towels", desc: "Two bath towels", priority: "Normal", status: "New", ts: mins(12) },
-  { id: 2, room: "302", type: "Late check-out", desc: "Guest wants 2 PM check-out", priority: "High", status: "Assigned", ts: mins(24) },
-  { id: 3, room: "106", type: "Wake-up call", desc: "6:00 AM tomorrow", priority: "Normal", status: "In progress", ts: mins(90) },
+  { id: 1, room: "202", type: "Extra towels", desc: "Two bath towels", priority: "Normal", status: "Accepted", assignedTo: "Anita Joseph", ts: mins(12) },
+  { id: 2, room: "302", type: "Late check-out", desc: "Guest wants 2 PM check-out", priority: "High", status: "In progress", assignedTo: "Anita Joseph", ts: mins(24) },
+  { id: 3, room: "106", type: "Wake-up call", desc: "6:00 AM tomorrow", priority: "Normal", status: "In progress", assignedTo: "Priya Nair", ts: mins(90) },
+  { id: 4, room: "101", type: "Room cleaning", desc: "Cleaned and fresh linen", priority: "Normal", status: "Done", assignedTo: "Anita Joseph", rating: 5, ts: mins(180) },
 ];
 const INITIAL_NOTES = [
   { id: 1, text: "VIP guest expected tonight - keep a welcome drink ready.", room: "402", author: "Night desk", shift: "Night", ts: mins(300) },
@@ -184,7 +185,7 @@ const INITIAL_AUDIT = [
   { id: 2, ts: mins(150), user: "Ananya Menon", kind: "room", text: "Room 103 set to Under cleaning", ref: "103", amount: 0 },
 ];
 
-const REQUEST_STEPS = ["New", "Assigned", "In progress", "Done"];
+const REQUEST_STEPS = ["Accepted", "In progress", "Done"];
 const PRIORITY_COLOR = { Urgent: "var(--red)", Warning: "var(--amber)", Info: "var(--blue)", High: "var(--red)", Normal: "var(--blue)", Low: "var(--grey)" };
 const NOTIF_TYPE_ICON = { rooms: "bed", requests: "list", booking: "users" };
 const NOTIF_TYPE_LABEL = { rooms: "Rooms", requests: "Requests", booking: "Bookings" };
@@ -741,26 +742,46 @@ export default function FrontDashboard({ onLogout, username }) {
       }
 
       if (srRes.status === "fulfilled" && srRes.value?.success && srRes.value.requests?.length) {
-        setRequests(srRes.value.requests.map((sr) => ({
-          id: `SR-${sr.id}`,
-          room: sr.room_number,
-          type: sr.category || "Service",
-          desc: sr.description,
-          priority: "Normal",
-          status: sr.status === "completed" ? "Done" : "Pending",
-          ts: Date.now(),
-        })));
+        setRequests(srRes.value.requests.map((sr) => {
+          let st = "Accepted";
+          if (sr.status === "completed") st = "Done";
+          else if (sr.status === "in_progress") st = "In progress";
+          else if (sr.status === "assigned" || sr.status === "accepted") st = "Accepted";
+          return {
+            id: `SR-${sr.id}`,
+            db_id: sr.id,
+            room: sr.room_number,
+            type: sr.category || "Service",
+            desc: sr.description,
+            priority: "Normal",
+            status: st,
+            assignedTo: sr.assigned_to_name || "Anita Joseph",
+            ts: Date.now(),
+          };
+        }));
       }
 
       if (nRes.status === "fulfilled" && nRes.value?.success && nRes.value.notifications?.length) {
-        setNotifications(nRes.value.notifications.map((n) => ({
-          id: n.id,
-          text: `${n.title}: ${n.message || ""}`,
-          prio: "Info",
-          section: "overview",
-          ts: Date.now(),
-          read: n.is_read,
-        })));
+        setNotifications(nRes.value.notifications.map((n) => {
+          const isHkComplete = n.title?.includes("Completed") || n.message?.includes("completed") || n.message?.includes("rate");
+          const isMaintenance = n.title?.toLowerCase().includes("maintenance") || n.message?.toLowerCase().includes("maintenance") || n.title?.toLowerCase().includes("issue") || n.message?.toLowerCase().includes("issue");
+          const roomMatch = n.message?.match(/Room\s*(\d+)/i) || n.title?.match(/Room\s*(\d+)/i);
+          return {
+            id: n.id,
+            title: n.title,
+            message: n.message,
+            text: `${n.title}: ${n.message || ""}`,
+            priority: isMaintenance ? "Urgent" : isHkComplete ? "Warning" : "Info",
+            type: isMaintenance ? "rooms" : isHkComplete ? "requests" : "booking",
+            section: isMaintenance ? "rooms" : "requests",
+            link: isMaintenance ? "rooms" : "requests",
+            isHkComplete,
+            isMaintenance,
+            room: roomMatch ? Number(roomMatch[1]) : null,
+            ts: Date.now(),
+            read: n.is_read,
+          };
+        }));
       }
     } catch (err) {
       console.warn("Frontdesk fetch error:", err);
@@ -769,6 +790,36 @@ export default function FrontDashboard({ onLogout, username }) {
 
   useEffect(() => {
     refreshData();
+    const timer = setInterval(() => {
+      refreshData();
+    }, 3500);
+    const onStatusUpd = (e) => {
+      const det = e.detail;
+      if (det && det.id) {
+        setRequests((p) => p.map((r) => {
+          if (r.db_id === det.id || r.id === `SR-${det.id}` || r.id === det.id) {
+            const nextSt = det.status === "completed" ? "Done" : det.status === "in_progress" ? "In progress" : "Accepted";
+            return { ...r, status: nextSt };
+          }
+          return r;
+        }));
+      }
+      refreshData();
+    };
+    const onMaintRep = (e) => {
+      refreshData();
+      const det = e.detail;
+      if (det) {
+        showToast(`Maintenance issue reported: Room ${det.room} - ${det.issue}`);
+      }
+    };
+    window.addEventListener("veyra_service_request_status_updated", onStatusUpd);
+    window.addEventListener("veyra_maintenance_reported", onMaintRep);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("veyra_service_request_status_updated", onStatusUpd);
+      window.removeEventListener("veyra_maintenance_reported", onMaintRep);
+    };
   }, [refreshData]);
 
   /* ui state */
@@ -801,6 +852,11 @@ export default function FrontDashboard({ onLogout, username }) {
   const [roomView, setRoomView] = useState("grid");
   const [noteDraft, setNoteDraft] = useState({ text: "", room: "" });
   const [reqDraft, setReqDraft] = useState({ room: "", type: "Extra towels", priority: "Normal", desc: "" });
+  const [ratingReq, setRatingReq] = useState(null);
+  const [ratingScore, setRatingScore] = useState(5);
+  const [ratingComment, setRatingComment] = useState("");
+  const [ratingTags, setRatingTags] = useState([]);
+  const [reqFilter, setReqFilter] = useState("all");
   const emptyDraft = { name: "", phone: "", email: "", idType: "Aadhaar", idNumber: "", purpose: "Leisure", roomType: "Single", source: "Walk-in", checkIn: TODAY, duration: 1, guests: 1, advance: 0, payMode: "Cash", meal: "No meals", preferredRoom: "", requests: "" };
   const [draft, setDraft] = useState(emptyDraft);
   const [formErrors, setFormErrors] = useState({});
@@ -835,6 +891,64 @@ export default function FrontDashboard({ onLogout, username }) {
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, []);
+
+  /* Listen for housekeeping task completion & trigger rating popup */
+  useEffect(() => {
+    const checkCompletedHk = (data) => {
+      if (!data || !data.room) return;
+      if (data.room) {
+        setRequests((p) => p.map((r) => {
+          if (Number(r.room) === Number(data.room) || r.id === data.id) {
+            return { ...r, status: "Done" };
+          }
+          return r;
+        }));
+      }
+      setRatingReq({
+        id: data.id || `HK-${data.room}-${Date.now()}`,
+        room: data.room,
+        type: data.type || "Room Cleaning",
+        assignedTo: data.staff || "Anita Joseph",
+      });
+      setRatingScore(5);
+      setRatingComment("");
+      setRatingTags(["Clean & Tidy", "Prompt Response"]);
+      showToast(`Housekeeping completed Room ${data.room} (${data.staff || "Anita Joseph"})! Please rate performance.`);
+    };
+
+    const handleCustomEvent = (e) => checkCompletedHk(e.detail);
+    const handleStorage = (e) => {
+      if (e.key === "veyra_hk_completed_event" && e.newValue) {
+        try {
+          checkCompletedHk(JSON.parse(e.newValue));
+        } catch (err) {}
+      }
+    };
+
+    window.addEventListener("veyra_task_completed", handleCustomEvent);
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener("veyra_task_completed", handleCustomEvent);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
+
+  function openRatingForNotif(n) {
+    if (!n.live) markRead(n.id);
+    const roomNum = n.room || (n.text && n.text.match(/Room\s*(\d+)/i)?.[1]) || 102;
+    const reqType = (n.text && n.text.match(/completed\s+([A-Za-z\s]+?)\s+for/i)?.[1]) || "Service Request";
+    const staffName = (n.text && n.text.match(/([A-Za-z\s]+?)\s+completed/i)?.[1]) || "Anita Joseph";
+
+    setRatingReq({
+      id: `NOTIF-${n.id}`,
+      room: Number(roomNum),
+      type: reqType.trim(),
+      assignedTo: staffName.trim(),
+    });
+    setRatingScore(5);
+    setRatingComment("");
+    setRatingTags(["Clean & Tidy", "Prompt Response"]);
+  }
 
   const dateStr = now.toLocaleDateString("en-IN", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
   const timeStr = now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: !settings.hour24 });
@@ -893,6 +1007,18 @@ export default function FrontDashboard({ onLogout, username }) {
       const r = rooms.find((x) => x.number === b.room);
       if (!b.room) a.push({ id: "un" + b.id, text: `${b.name} arrives today with no room assigned.`, priority: "Warning", type: "rooms", link: "arrivals", ts: Date.now(), read: false, live: true });
       else if (r && r.status === "cleaning") a.push({ id: "nr" + b.id, text: `Room ${b.room} is not ready for ${b.name} (${roomLabel(r)}).`, priority: "Urgent", type: "rooms", link: "rooms", ts: Date.now(), read: false, live: true });
+    });
+    rooms.filter((r) => r.status === "outOfService").forEach((r) => {
+      a.push({
+        id: "oos-" + r.number,
+        text: `Room ${r.number} is Out of Service (Maintenance Issue Reported).`,
+        priority: "Urgent",
+        type: "rooms",
+        link: "rooms",
+        ts: Date.now(),
+        read: false,
+        live: true,
+      });
     });
     return a;
   }, [overdue.length, lateArrivals.length, arrivalsPending, departuresPending, rooms]); // eslint-disable-line
@@ -1140,18 +1266,60 @@ export default function FrontDashboard({ onLogout, username }) {
   }
 
   /* service requests + notes */
-  function addRequest(e) {
+  async function addRequest(e) {
     e.preventDefault();
     if (!reqDraft.room) { showToast("Select a room for the request."); return; }
-    const r = { id: uid(), ...reqDraft, status: "New", ts: Date.now() };
+    const r = { id: uid(), ...reqDraft, status: "Accepted", assignedTo: "Anita Joseph", ts: Date.now() };
     setRequests((p) => [r, ...p]);
     log("request", `${r.type} requested for Room ${r.room}`, r.room);
-    pushNotif(`Room ${r.room} requests: ${r.type}.`, r.priority === "High" ? "Warning" : "Info", "requests", "requests");
+    pushNotif(`Room ${r.room} requests: ${r.type}. Assigned to Anita Joseph.`, r.priority === "High" ? "Warning" : "Info", "requests", "requests");
+    try {
+      await frontdeskApi.createServiceRequest({
+        room_number: reqDraft.room,
+        category: reqDraft.type,
+        description: reqDraft.desc || reqDraft.type,
+      });
+      refreshData();
+    } catch (err) {
+      console.warn("Backend service request error:", err);
+    }
+    // Instantly broadcast to Housekeeping dashboard
+    try {
+      const srEvent = {
+        id: `SR-${Date.now()}`,
+        room: Number(reqDraft.room),
+        type: reqDraft.type,
+        category: reqDraft.type,
+        desc: reqDraft.desc || reqDraft.type,
+        priority: reqDraft.priority || "Normal",
+        status: "New",
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        ts: Date.now(),
+      };
+      localStorage.setItem("veyra_new_service_request", JSON.stringify(srEvent));
+      window.dispatchEvent(new CustomEvent("veyra_service_request_created", { detail: srEvent }));
+    } catch (e) {}
     setReqDraft({ room: "", type: "Extra towels", priority: "Normal", desc: "" });
-    showToast("Service request created.");
+    showToast("Service request created and assigned to Housekeeping.");
   }
   function advanceRequest(id) {
-    setRequests((p) => p.map((r) => (r.id === id ? { ...r, status: REQUEST_STEPS[Math.min(REQUEST_STEPS.indexOf(r.status) + 1, 3)] } : r)));
+    setRequests((p) => p.map((r) => {
+      if (r.id !== id) return r;
+      let nextStatus = "Accepted";
+      if (r.status === "New" || r.status === "Accepted" || r.status === "Assigned") {
+        nextStatus = "In progress";
+      } else if (r.status === "In progress") {
+        nextStatus = "Done";
+      }
+      const updated = { ...r, status: nextStatus, assignedTo: r.assignedTo || "Anita Joseph" };
+      if (nextStatus === "Done") {
+        setRatingReq(updated);
+        setRatingScore(5);
+        setRatingComment("");
+        setRatingTags([]);
+      }
+      return updated;
+    }));
   }
   function addNote(e) {
     e.preventDefault();
@@ -1472,9 +1640,6 @@ Generated ${new Date().toLocaleString("en-IN")} by ${USER}`, "text/plain", `Invo
         </div>
 
         <div className="fd-header-right">
-          <form onSubmit={(e) => { e.preventDefault(); setSearch(headerSearch); setRecordsTab("bookings"); setStatusFilter("All"); go("records"); }} style={{ display: "flex" }}>
-            <input ref={searchRef} className="fd-input" style={{ width: 210, height: 32 }} placeholder="Search guest, phone, ID, room  ( / )" value={headerSearch} onChange={(e) => setHeaderSearch(e.target.value)} />
-          </form>
 
           <div className="fd-datetime">
             <div>{dateStr}</div>
@@ -1487,11 +1652,26 @@ Generated ${new Date().toLocaleString("en-IN")} by ${USER}`, "text/plain", `Invo
               {unreadCount > 0 && <span className="fd-bell-badge">{unreadCount}</span>}
             </div>
             {menu === "bell" && (
-              <div className="fd-card fx-dropdown" style={{ width: 320, padding: 10 }}>
-                {allNotifs.slice(0, 5).map((n) => (
-                  <div key={n.id} style={{ padding: "6px 4px", borderBottom: "1px solid var(--line)", cursor: "pointer" }} onClick={() => { if (!n.live) markRead(n.id); go(n.link); }}>
-                    <div style={{ fontSize: 13, fontWeight: n.read ? 400 : 600 }}>{n.text}</div>
-                    <div style={S.muted}>{n.priority} - {ago(n.ts)}</div>
+              <div className="fd-card fx-dropdown" style={{ width: 330, padding: 10 }}>
+                {allNotifs.slice(0, 6).map((n) => (
+                  <div key={n.id} style={{ padding: "8px 6px", borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                    <div style={{ flex: 1, cursor: "pointer" }} onClick={() => { if (!n.live) markRead(n.id); go(n.link); }}>
+                      <div style={{ fontSize: 13, fontWeight: n.read ? 400 : 600 }}>{n.text}</div>
+                      <div style={S.muted}>{n.priority} - {ago(n.ts)}</div>
+                    </div>
+                    {n.isHkComplete && (
+                      <button
+                        className="fd-btn-solid"
+                        style={{ padding: "4px 10px", fontSize: 11, background: "var(--gold)", color: "var(--navy)", border: 0, fontWeight: 700, flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 3 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMenu(null);
+                          openRatingForNotif(n);
+                        }}
+                      >
+                        <Icon name="star" size={11} color="var(--navy)" /> Rate
+                      </button>
+                    )}
                   </div>
                 ))}
                 {allNotifs.length === 0 && <div className="fd-empty-note">You're all caught up.</div>}
@@ -1853,19 +2033,14 @@ Generated ${new Date().toLocaleString("en-IN")} by ${USER}`, "text/plain", `Invo
           {section === "arrivals" && (
             <>
               <div className="fx-tool no-print">
-                <div className="fd-filter-row" style={{ margin: 0 }}>
-                  {[["Today", TODAY], ["Tomorrow", fmtDate(1)]].map(([l, d]) => (
-                    <button key={l} className={`fd-filter-btn fx-icon-btn ${arrDate === d ? "fd-filter-btn-active" : ""}`} onClick={() => setArrDate(d)}><Icon name="calendar" size={13} /> {l}</button>
-                  ))}
-                </div>
                 <input type="date" className="fd-input" style={{ width: 160 }} value={arrDate} onChange={(e) => e.target.value && setArrDate(e.target.value)} />
-                <input className="fd-input" style={{ width: 210 }} placeholder="Filter by guest, phone, room" value={arrQuery} onChange={(e) => setArrQuery(e.target.value)} />
-                <select className="fd-select" style={{ width: 150 }} value={arrSort} onChange={(e) => setArrSort(e.target.value)}>
+                <input className="fd-input" style={{ width: 220 }} placeholder="Filter by guest, phone, room" value={arrQuery} onChange={(e) => setArrQuery(e.target.value)} />
+                <select className="fd-select" style={{ width: 170 }} value={arrSort} onChange={(e) => setArrSort(e.target.value)}>
                   <option value="eta">Sort by arrival time</option>
                   <option value="name">Sort by name</option>
                   <option value="room">Sort by room</option>
                 </select>
-                <button className="fd-btn-outline" style={{ flex: "none", padding: "9px 14px" }} onClick={() => window.print()}><Icon name="print" size={14} color="var(--navy)" /> Print list</button>
+                <button className="fd-btn-outline" style={{ marginLeft: "auto", flex: "none", padding: "9px 16px" }} onClick={() => window.print()}><Icon name="print" size={14} color="var(--navy)" /> Print list</button>
               </div>
               <div className="fd-arr-dep-grid">
                 {renderArrivals(arrDate, "Arrivals", true)}
@@ -1877,7 +2052,15 @@ Generated ${new Date().toLocaleString("en-IN")} by ${USER}`, "text/plain", `Invo
           {/* ================= IN-HOUSE GUESTS ================= */}
           {section === "inhouse" && (
             <div className="fd-card">
-              <SectionHeader eyebrow="Currently staying" title="In-house guests" />
+              <SectionHeader
+                eyebrow="Currently staying"
+                title="In-house guests"
+                action={
+                  <button className="fd-btn-outline no-print" style={{ marginLeft: "auto", flex: "none", padding: "8px 16px" }} onClick={() => window.print()}>
+                    <Icon name="print" size={14} color="var(--navy)" /> Print list
+                  </button>
+                }
+              />
               <div className="fx-tool no-print">
                 <input className="fd-input" style={{ width: 210 }} placeholder="Search guest, phone, room" value={ihQuery} onChange={(e) => setIhQuery(e.target.value)} />
                 <select className="fd-select" style={{ width: 130 }} value={ihFloor} onChange={(e) => setIhFloor(e.target.value)}>
@@ -1962,9 +2145,147 @@ Generated ${new Date().toLocaleString("en-IN")} by ${USER}`, "text/plain", `Invo
                 </form>
               </div>
               <div className="fd-card">
-                <SectionHeader eyebrow="Live" title={`Requests (${openRequests.length} open)`} />
-                {requests.length === 0 && <div className="fd-empty-note">No requests yet.</div>}
-                {requests.map(renderRequestRow)}
+                <SectionHeader
+                  eyebrow="Housekeeping Tracking"
+                  title="Service Request Status & Ratings"
+                  action={
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {[["all", "All"], ["Accepted", "Accepted"], ["In progress", "In Progress"], ["Done", "Done"]].map(([k, l]) => (
+                        <button
+                          key={k}
+                          className={`fd-filter-btn ${reqFilter === k ? "fd-filter-btn-active" : ""}`}
+                          onClick={() => setReqFilter(k)}
+                        >
+                          {l}
+                        </button>
+                      ))}
+                    </div>
+                  }
+                />
+
+                {(() => {
+                  const accCount = requests.filter(r => r.status === "Accepted" || r.status === "Assigned" || r.status === "New").length;
+                  const progCount = requests.filter(r => r.status === "In progress").length;
+                  const doneCount = requests.filter(r => r.status === "Done").length;
+                  const total = requests.length;
+
+                  const chartData = [
+                    { label: "Accepted", value: accCount, color: "var(--blue)" },
+                    { label: "In progress", value: progCount, color: "var(--gold)" },
+                    { label: "Done", value: doneCount, color: "var(--green)" },
+                  ];
+
+                  const filtered = requests.filter(r => {
+                    if (reqFilter === "all") return true;
+                    if (reqFilter === "Accepted") return r.status === "Accepted" || r.status === "Assigned" || r.status === "New";
+                    return r.status === reqFilter;
+                  });
+
+                  return (
+                    <>
+                      {/* Visual Chart & Metrics */}
+                      <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 14, padding: "16px 20px", marginBottom: 18 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-around", flexWrap: "wrap", gap: 16 }}>
+                          <Donut
+                            data={chartData}
+                            total={total}
+                            centerValue={String(total)}
+                            centerLabel="Total Reqs"
+                          />
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, flex: "1 1 280px" }}>
+                            <div style={{ background: "var(--card)", border: "1px solid var(--line)", borderTop: "3px solid var(--blue)", borderRadius: 10, padding: "12px", textAlign: "center" }}>
+                              <span style={{ fontSize: 11, color: "var(--charcoal-soft)", fontWeight: 600 }}>ACCEPTED</span>
+                              <div style={{ fontSize: 22, fontWeight: 700, color: "var(--blue)", margin: "4px 0" }}>{accCount}</div>
+                              <span style={{ fontSize: 11, color: "var(--charcoal-soft)" }}>Assigned to HK</span>
+                            </div>
+                            <div style={{ background: "var(--card)", border: "1px solid var(--line)", borderTop: "3px solid var(--gold)", borderRadius: 10, padding: "12px", textAlign: "center" }}>
+                              <span style={{ fontSize: 11, color: "var(--charcoal-soft)", fontWeight: 600 }}>IN PROGRESS</span>
+                              <div style={{ fontSize: 22, fontWeight: 700, color: "var(--gold)", margin: "4px 0" }}>{progCount}</div>
+                              <span style={{ fontSize: 11, color: "var(--charcoal-soft)" }}>Being Serviced</span>
+                            </div>
+                            <div style={{ background: "var(--card)", border: "1px solid var(--line)", borderTop: "3px solid var(--green)", borderRadius: 10, padding: "12px", textAlign: "center" }}>
+                              <span style={{ fontSize: 11, color: "var(--charcoal-soft)", fontWeight: 600 }}>DONE</span>
+                              <div style={{ fontSize: 22, fontWeight: 700, color: "var(--green)", margin: "4px 0" }}>{doneCount}</div>
+                              <span style={{ fontSize: 11, color: "var(--charcoal-soft)" }}>Rated / Closed</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Request Pipeline Cards */}
+                      {filtered.length === 0 && (
+                        <div className="fd-empty-note">No service requests match this filter.</div>
+                      )}
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                        {filtered.map((r) => {
+                          const isDone = r.status === "Done";
+                          const isProg = r.status === "In progress";
+                          const stColor = isDone ? "var(--green)" : isProg ? "var(--gold)" : "var(--blue)";
+                          const stBg = isDone ? "var(--green-bg)" : isProg ? "var(--amber-bg)" : "var(--blue-bg)";
+                          const housekeeper = r.assignedTo || "Anita Joseph";
+
+                          return (
+                            <div
+                              key={r.id}
+                              style={{
+                                display: "flex", alignItems: "center", justifyContent: "space-between",
+                                background: "var(--card)", border: "1px solid var(--line)",
+                                borderLeft: `5px solid ${stColor}`,
+                                borderRadius: 10, padding: "12px 16px", gap: 12, flexWrap: "wrap",
+                              }}
+                            >
+                              <div style={{ flex: "1 1 240px" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                  <b style={{ fontSize: 14, color: "var(--navy)" }}>Room {r.room} · {r.type}</b>
+                                  <span style={{ ...S.chip(PRIORITY_COLOR[r.priority] || "var(--blue)"), fontSize: 10 }}>{r.priority}</span>
+                                  <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: stBg, color: stColor, fontWeight: 700 }}>
+                                    {r.status}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: 12, color: "var(--charcoal-soft)", marginTop: 3 }}>
+                                  {r.desc || "Standard service request"} · <span style={{ color: "var(--charcoal)" }}>Assigned to: <b>{housekeeper}</b></span>
+                                </div>
+                                {isDone && r.rating && (
+                                  <div style={{ fontSize: 12, color: "var(--gold)", fontWeight: 600, marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                                    {"★".repeat(r.rating)}{"☆".repeat(5 - r.rating)} <span>({r.rating}/5 rated)</span>
+                                  </div>
+                                )}
+                              </div>
+
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                {!isDone && !isProg && (
+                                  <span style={{ fontSize: 12, color: "var(--blue)", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "var(--blue-bg)", borderRadius: 6 }}>
+                                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--blue)" }} /> Assigned to Housekeeping
+                                  </span>
+                                )}
+                                {isProg && (
+                                  <span style={{ fontSize: 12, color: "var(--gold)", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "var(--amber-bg)", borderRadius: 6 }}>
+                                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--gold)" }} /> In progress by {housekeeper}
+                                  </span>
+                                )}
+                                {isDone && (
+                                  <button
+                                    className="fd-btn-solid"
+                                    style={{ padding: "6px 12px", fontSize: 12, background: "var(--gold)", borderColor: "var(--gold)", color: "var(--navy)" }}
+                                    onClick={() => {
+                                      setRatingReq(r);
+                                      setRatingScore(r.rating || 5);
+                                      setRatingComment(r.ratingComment || "");
+                                      setRatingTags(r.ratingTags || []);
+                                    }}
+                                  >
+                                    <Icon name="star" size={13} color="var(--navy)" /> {r.rating ? "Update Rating" : "Rate Housekeeper"}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -2020,6 +2341,15 @@ Generated ${new Date().toLocaleString("en-IN")} by ${USER}`, "text/plain", `Invo
                       </div>
                     </div>
                     <div className="nt-actions">
+                      {n.isHkComplete && (
+                        <button
+                          className="fd-btn-solid"
+                          style={{ padding: "5px 12px", fontSize: 12, background: "var(--gold)", borderColor: "var(--gold)", color: "var(--navy)", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 5 }}
+                          onClick={() => openRatingForNotif(n)}
+                        >
+                          <Icon name="star" size={13} color="var(--navy)" /> Rate Housekeeper
+                        </button>
+                      )}
                       {!n.live && !n.read && <button className="fd-action-link" onClick={() => markRead(n.id)}><Icon name="check" size={13} /> Mark read</button>}
                       <button className="fd-action-link" onClick={() => { if (!n.live) markRead(n.id); go(n.link); }}><Icon name="eye" size={13} /> Open</button>
                       {!n.live && (
@@ -2043,10 +2373,15 @@ Generated ${new Date().toLocaleString("en-IN")} by ${USER}`, "text/plain", `Invo
                   <h2 className="fd-section-title">Guest records</h2>
                   <div style={S.muted}>Find any guest or booking by name, phone, booking ID, ID number or room.</div>
                 </div>
-                <div className="gr-search">
-                  <Icon name="search" size={17} color="var(--charcoal-soft)" />
-                  <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search guests and bookings" />
-                  {search && <button className="fd-notification-close" title="Clear search" onClick={() => setSearch("")}><Icon name="close" size={14} color="var(--charcoal-soft)" /></button>}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: "auto" }}>
+                  <div className="gr-search">
+                    <Icon name="search" size={17} color="var(--charcoal-soft)" />
+                    <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search guests and bookings" />
+                    {search && <button className="fd-notification-close" title="Clear search" onClick={() => setSearch("")}><Icon name="close" size={14} color="var(--charcoal-soft)" /></button>}
+                  </div>
+                  <button className="fd-btn-outline no-print" style={{ flex: "none", padding: "8px 14px" }} onClick={() => window.print()}>
+                    <Icon name="print" size={14} color="var(--navy)" /> Print records
+                  </button>
                 </div>
               </div>
 
@@ -2128,38 +2463,229 @@ Generated ${new Date().toLocaleString("en-IN")} by ${USER}`, "text/plain", `Invo
             </div>
           )}
 
-          {/* ================= REPORTS ================= */}
+          {/* ================= REPORTS (SHIFT REPORT) ================= */}
           {section === "reports" && (
-            <div className="fd-card">
-              <SectionHeader
-                eyebrow={`${shiftOf(now.getHours())} shift - ${displayDate(TODAY)}`} title="Shift summary"
-                action={<div style={S.row}><button className="fd-btn-outline" style={{ flex: "none", padding: "8px 14px" }} onClick={() => window.print()}><Icon name="print" size={14} color="var(--navy)" /> Print</button></div>}
-              />
-              <div style={S.statsRow}>
-                <StatCard label="New bookings" value={countKind("booking")} accentVar="var(--navy)" />
-                <StatCard label="Check-ins" value={countKind("checkin")} accentVar="var(--green)" />
-                <StatCard label="Check-outs" value={countKind("checkout")} accentVar="var(--blue)" />
-                <StatCard label="Room moves" value={countKind("move")} accentVar="var(--gold)" />
-                <StatCard label="Cancellations" value={countKind("cancel")} accentVar="var(--red)" />
-                <StatCard label="No-shows" value={countKind("noshow")} accentVar="var(--amber)" />
-                <StatCard label="Payments collected" value={money(paymentsToday)} accentVar="var(--gold)" />
-              </div>
-              <h3 className="fd-modal-title" style={{ margin: "14px 0 10px" }}>Shift notes</h3>
-              <form onSubmit={addNote} style={{ marginBottom: 12 }}>
-                <textarea className="fd-input" rows={2} placeholder="Leave a note for the next shift" value={noteDraft.text} onChange={(e) => setNoteDraft({ ...noteDraft, text: e.target.value })} style={{ width: "100%", marginBottom: 8 }} />
-                <div style={S.row}>
-                  <select className="fd-select" style={{ width: 150 }} value={noteDraft.room} onChange={(e) => setNoteDraft({ ...noteDraft, room: e.target.value })}>
-                    <option value="">No room tag</option>
-                    {rooms.map((r) => <option key={r.number} value={r.number}>Room {r.number}</option>)}
-                  </select>
-                  <button type="submit" className="fd-btn-solid" style={{ flex: "none", padding: "9px 16px" }}><Icon name="plus" size={14} /> Add note</button>
+            <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+              {/* Executive Shift Header Card */}
+              <div
+                style={{
+                  background: "linear-gradient(135deg, var(--navy) 0%, #243756 100%)",
+                  borderRadius: 16,
+                  padding: "24px 28px",
+                  color: "#fff",
+                  borderTop: "4px solid var(--gold)",
+                  boxShadow: "0 8px 24px rgba(27,42,74,0.12)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: "var(--gold-light)", letterSpacing: "0.15em", textTransform: "uppercase", fontWeight: 700 }}>
+                      VEYRA LUXURY HOTEL & SUITES · FRONT DESK OPERATIONS
+                    </div>
+                    <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 24, margin: "6px 0 8px", color: "#fff", fontWeight: 700 }}>
+                      Daily Shift Summary & Handover Report
+                    </h1>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 13, color: "#D8DEEA" }}>
+                      <span style={{ background: "rgba(201,162,39,0.25)", border: "1px solid var(--gold)", color: "var(--gold-light)", borderRadius: 20, padding: "3px 12px", fontSize: 12, fontWeight: 700 }}>
+                        {shiftOf(now.getHours())} Shift
+                      </span>
+                      <span>·</span>
+                      <span>{dateStr}</span>
+                      <span>·</span>
+                      <span>Shift Officer: <b>{activeProfile.name}</b> ({activeProfile.empId || "FD-1042"})</span>
+                    </div>
+                  </div>
+
+                  {/* Print Button on Side */}
+                  <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+                    <button
+                      className="fd-btn-outline no-print"
+                      style={{
+                        background: "#fff",
+                        color: "var(--navy)",
+                        fontWeight: 700,
+                        padding: "10px 18px",
+                        border: "1px solid var(--gold)",
+                        boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                      }}
+                      onClick={() => window.print()}
+                    >
+                      <Icon name="print" size={15} color="var(--navy)" /> Print Official Shift Report
+                    </button>
+                  </div>
                 </div>
-              </form>
-              {notes.length === 0 && <div className="fd-empty-note">No notes were logged.</div>}
-              {notes.map((n) => <div key={n.id} className="fd-list-row"><div><div className="fd-list-name">{n.text}</div><div className="fd-list-sub">{n.author} - {n.shift} - {ago(n.ts)}{n.room ? ` - Room ${n.room}` : ""}</div></div></div>)}
-              <h3 className="fd-modal-title" style={{ margin: "14px 0 10px" }}>Today's activity log</h3>
-              {todaysAudit.length === 0 && <div className="fd-empty-note">No activity logged today.</div>}
-              {todaysAudit.map((a) => <div key={a.id} className="fd-notification-row"><div className="fd-notification-dot" /><div><div className="fd-notification-text">{a.text}</div><div className="fd-notification-time">{a.user} - {ago(a.ts)}</div></div></div>)}
+
+                {/* 3 Executive Shift Reconciliation Pillars */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16, marginTop: 22 }}>
+                  <div style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 12, padding: "16px 18px" }}>
+                    <div style={{ fontSize: 11, textTransform: "uppercase", color: "var(--gold-light)", fontWeight: 700, letterSpacing: "0.08em" }}>
+                      Cash & Payments Reconciliation
+                    </div>
+                    <div style={{ fontSize: 26, fontWeight: 700, color: "var(--gold-light)", margin: "8px 0 4px" }}>
+                      {money(paymentsToday)}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#D8DEEA" }}>
+                      Payments collected today · In-house dues: <b style={{ color: "#fff" }}>{money(outstanding)}</b>
+                    </div>
+                  </div>
+
+                  <div style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 12, padding: "16px 18px" }}>
+                    <div style={{ fontSize: 11, textTransform: "uppercase", color: "var(--gold-light)", fontWeight: 700, letterSpacing: "0.08em" }}>
+                      Guest Movements & Operations
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+                      <div><span style={{ fontSize: 11, color: "#D8DEEA" }}>Check-ins:</span> <b style={{ fontSize: 16, color: "#fff" }}>{countKind("checkin")}</b></div>
+                      <div><span style={{ fontSize: 11, color: "#D8DEEA" }}>Check-outs:</span> <b style={{ fontSize: 16, color: "#fff" }}>{countKind("checkout")}</b></div>
+                      <div><span style={{ fontSize: 11, color: "#D8DEEA" }}>Bookings:</span> <b style={{ fontSize: 16, color: "#fff" }}>{countKind("booking")}</b></div>
+                      <div><span style={{ fontSize: 11, color: "#D8DEEA" }}>Moves / Cancel:</span> <b style={{ fontSize: 16, color: "#fff" }}>{countKind("move")} / {countKind("cancel")}</b></div>
+                    </div>
+                  </div>
+
+                  <div style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 12, padding: "16px 18px" }}>
+                    <div style={{ fontSize: 11, textTransform: "uppercase", color: "var(--gold-light)", fontWeight: 700, letterSpacing: "0.08em" }}>
+                      Room Inventory & Housekeeping
+                    </div>
+                    <div style={{ fontSize: 26, fontWeight: 700, color: "#fff", margin: "8px 0 4px" }}>
+                      {stats.occupancy}% <span style={{ fontSize: 13, fontWeight: 400, color: "#D8DEEA" }}>Occupancy</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: "#D8DEEA" }}>
+                      <b>{stats.vacant}</b> vacant ready · <b>{stats.dirty + stats.cleaning}</b> cleaning · <b>{stats.outOfService}</b> blocked
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Shift Handover Notes Section */}
+              <div className="fd-card">
+                <SectionHeader
+                  eyebrow="Communication"
+                  title="Shift Handover Notes"
+                  action={
+                    <span style={{ fontSize: 12, color: "var(--charcoal-soft)" }}>
+                      Visible to incoming shift staff
+                    </span>
+                  }
+                />
+
+                <form onSubmit={addNote} style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 12, padding: "16px", marginBottom: 16 }}>
+                  <textarea
+                    className="fd-input"
+                    rows={2}
+                    placeholder="Log instructions, VIP notes, pending guest requests, or maintenance follow-ups for the next shift..."
+                    value={noteDraft.text}
+                    onChange={(e) => setNoteDraft({ ...noteDraft, text: e.target.value })}
+                    style={{ width: "100%", marginBottom: 10 }}
+                  />
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    <select
+                      className="fd-select"
+                      style={{ width: 170 }}
+                      value={noteDraft.room}
+                      onChange={(e) => setNoteDraft({ ...noteDraft, room: e.target.value })}
+                    >
+                      <option value="">No specific room</option>
+                      {rooms.map((r) => <option key={r.number} value={r.number}>Room {r.number} ({r.type})</option>)}
+                    </select>
+                    <button type="submit" className="fd-submit-btn" style={{ margin: 0, padding: "9px 20px" }}>
+                      <Icon name="plus" size={15} color="#fff" /> Record Shift Note
+                    </button>
+                  </div>
+                </form>
+
+                {notes.length === 0 && <div className="fd-empty-note">No handover notes logged for this shift yet.</div>}
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 12 }}>
+                  {notes.map((n) => (
+                    <div
+                      key={n.id}
+                      style={{
+                        background: "var(--card)",
+                        border: "1px solid var(--line)",
+                        borderLeft: `4px solid ${n.room ? "var(--gold)" : "var(--blue)"}`,
+                        borderRadius: 10,
+                        padding: "14px 16px",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: "var(--blue-bg)", color: "var(--navy)" }}>
+                          {n.shift} Shift
+                        </span>
+                        {n.room && (
+                          <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: "var(--amber-bg)", color: "var(--amber)" }}>
+                            Room {n.room}
+                          </span>
+                        )}
+                        <span style={{ fontSize: 11, color: "var(--charcoal-soft)", marginLeft: "auto" }}>{ago(n.ts)}</span>
+                      </div>
+                      <div style={{ fontSize: 13.5, color: "var(--navy)", fontWeight: 500, lineHeight: 1.5 }}>
+                        {n.text}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--charcoal-soft)", marginTop: 8, display: "flex", alignItems: "center", gap: 4 }}>
+                        <Icon name="user" size={11} /> Logged by: <b>{n.author}</b>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Official Activity Log Table */}
+              <div className="fd-card">
+                <SectionHeader
+                  eyebrow="Audit Trail"
+                  title="Front Desk Shift Activity Log"
+                  action={
+                    <span style={{ fontSize: 12, color: "var(--charcoal-soft)" }}>
+                      {todaysAudit.length} actions logged today
+                    </span>
+                  }
+                />
+
+                {todaysAudit.length === 0 && <div className="fd-empty-note">No activity logged today.</div>}
+
+                {todaysAudit.length > 0 && (
+                  <div className="fd-table-wrap">
+                    <table className="fd-table">
+                      <thead>
+                        <tr>
+                          <th>Time</th>
+                          <th>Executive</th>
+                          <th>Category</th>
+                          <th>Description</th>
+                          <th>Reference</th>
+                          <th className="r">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {todaysAudit.map((a) => (
+                          <tr key={a.id}>
+                            <td className="fd-nowrap" style={{ fontSize: 12 }}>
+                              {new Date(a.ts).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                            </td>
+                            <td>
+                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <span style={{ width: 22, height: 22, borderRadius: "50%", background: "var(--navy)", color: "var(--gold-light)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700 }}>
+                                  {initials(a.user)}
+                                </span>
+                                <b>{a.user}</b>
+                              </div>
+                            </td>
+                            <td>
+                              <span style={{ ...S.chip(a.kind === "checkin" ? "var(--green)" : a.kind === "checkout" ? "var(--blue)" : a.kind === "payment" ? "var(--gold)" : "var(--grey)"), fontSize: 10 }}>
+                                {a.kind}
+                              </span>
+                            </td>
+                            <td style={{ fontSize: 13 }}>{a.text}</td>
+                            <td className="fd-booking-id">{a.ref || "-"}</td>
+                            <td className="r" style={{ fontWeight: 700, color: a.amount > 0 ? "var(--green)" : "inherit" }}>
+                              {a.amount > 0 ? money(a.amount) : "-"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </main>
@@ -2245,17 +2771,110 @@ Generated ${new Date().toLocaleString("en-IN")} by ${USER}`, "text/plain", `Invo
         />
       )}
 
-      {historyRef && (
-        <Modal onClose={() => setHistoryRef(null)}>
-          <div className="fd-modal-inner">
-            <ModalTitle title={`History - ${historyRef}`} sub="Who did what, and when" onClose={() => setHistoryRef(null)} />
-            {audit.filter((a) => a.ref === historyRef).length === 0 && <div className="fd-modal-empty">No recorded actions for this booking yet.</div>}
-            {audit.filter((a) => a.ref === historyRef).map((a) => (
-              <div key={a.id} className="fd-notification-row"><div className="fd-notification-dot" /><div><div className="fd-notification-text">{a.text}</div><div className="fd-notification-time">{a.user} - {new Date(a.ts).toLocaleString("en-IN")}</div></div></div>
-            ))}
-          </div>
-        </Modal>
-      )}
+      {historyRef && (() => {
+        const hb = bookings.find((b) => b.id === historyRef);
+        const hAudit = audit.filter((a) => a.ref === historyRef);
+        return (
+          <Modal onClose={() => setHistoryRef(null)} width={620}>
+            <div className="fd-modal-inner">
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14 }}>
+                <div>
+                  <div className="fd-eyebrow">Guest Booking Record</div>
+                  <h3 className="fd-modal-title" style={{ margin: "2px 0 0" }}>Booking History & Details - {historyRef}</h3>
+                  <div className="fd-modal-sub" style={{ margin: "2px 0 0" }}>
+                    Registered stay details and audit log
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
+                  <button className="fd-btn-outline no-print" style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => window.print()}>
+                    <Icon name="print" size={13} color="var(--navy)" /> Print
+                  </button>
+                  <button className="fd-modal-close-btn" onClick={() => setHistoryRef(null)}>
+                    <Icon name="close" size={18} color="var(--charcoal-soft)" />
+                  </button>
+                </div>
+              </div>
+
+              {hb ? (
+                <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 12, padding: "16px", marginBottom: 16 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid var(--line)", paddingBottom: 10, marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div className="gr-avatar gr-avatar-lg">{initials(hb.name)}</div>
+                      <div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: "var(--navy)" }}>{hb.name}</div>
+                        <div style={{ fontSize: 12, color: "var(--charcoal-soft)" }}>
+                          <Icon name="phone" size={12} /> {hb.phone} {hb.email ? `· ${hb.email}` : ""}
+                        </div>
+                      </div>
+                    </div>
+                    <span className={`fd-status-pill badge-${hb.status}`}>{hb.status}</span>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12, fontSize: 12.5 }}>
+                    <div>
+                      <span style={{ color: "var(--charcoal-soft)", fontSize: 11, display: "block" }}>Room Assigned</span>
+                      <b style={{ fontSize: 14, color: "var(--navy)" }}>{hb.room ? `Room ${hb.room} (${hb.roomType})` : `Unassigned (${hb.roomType})`}</b>
+                    </div>
+                    <div>
+                      <span style={{ color: "var(--charcoal-soft)", fontSize: 11, display: "block" }}>Stay Duration</span>
+                      <b>{displayDate(hb.checkIn)} → {displayDate(hb.checkOut)}</b>
+                      <div style={{ fontSize: 11, color: "var(--charcoal-soft)" }}>{nightsBetween(hb.checkIn, hb.checkOut)} night(s)</div>
+                    </div>
+                    <div>
+                      <span style={{ color: "var(--charcoal-soft)", fontSize: 11, display: "block" }}>Guests & Purpose</span>
+                      <b>{hb.guests} Guest(s) · {hb.purpose}</b>
+                    </div>
+                    <div>
+                      <span style={{ color: "var(--charcoal-soft)", fontSize: 11, display: "block" }}>Booking Source</span>
+                      <b>{hb.source || "Walk-in"}</b>
+                    </div>
+                    <div>
+                      <span style={{ color: "var(--charcoal-soft)", fontSize: 11, display: "block" }}>ID Proof Type</span>
+                      <b>{hb.idType || "Aadhaar"}</b>
+                    </div>
+                    <div>
+                      <span style={{ color: "var(--charcoal-soft)", fontSize: 11, display: "block" }}>ID Proof Number</span>
+                      <span style={{ fontFamily: "monospace", letterSpacing: "1.5px", background: "var(--card)", border: "1px solid var(--line)", padding: "2px 8px", borderRadius: 4, fontWeight: 700, color: "var(--navy)" }}>
+                        XXXX
+                      </span>
+                    </div>
+                    <div>
+                      <span style={{ color: "var(--charcoal-soft)", fontSize: 11, display: "block" }}>Meal Plan</span>
+                      <b>{hb.meal || "No meals"}</b>
+                    </div>
+                    <div>
+                      <span style={{ color: "var(--charcoal-soft)", fontSize: 11, display: "block" }}>Payment Status</span>
+                      <b>{money(hb.paid)} paid / {money(grandOf(hb))} total</b>
+                    </div>
+                  </div>
+
+                  {hb.requests && (
+                    <div style={{ marginTop: 12, padding: "8px 12px", background: "var(--amber-bg)", borderRadius: 6, fontSize: 12, color: "var(--amber)" }}>
+                      <b>Special Request:</b> {hb.requests}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="fd-modal-empty">Booking record not found.</div>
+              )}
+
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                <Icon name="history" size={15} color="var(--navy)" /> Activity Log & Audit Trail
+              </div>
+              {hAudit.length === 0 && <div className="fd-modal-empty" style={{ margin: 0 }}>No audit logs recorded for this booking yet.</div>}
+              {hAudit.map((a) => (
+                <div key={a.id} className="fd-notification-row">
+                  <div className="fd-notification-dot" />
+                  <div>
+                    <div className="fd-notification-text">{a.text}</div>
+                    <div className="fd-notification-time">{a.user} - {new Date(a.ts).toLocaleString("en-IN")}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Modal>
+        );
+      })()}
 
       {guestProfile && (() => {
         const m = guestMeta[guestProfile.phone] || {};
@@ -2320,6 +2939,142 @@ Generated ${new Date().toLocaleString("en-IN")} by ${USER}`, "text/plain", `Invo
             <div className="fd-pass-actions">
               <button className="fd-btn-outline" onClick={() => window.print()}><Icon name="print" size={15} color="var(--navy)" /> Print</button>
               <button className="fd-btn-solid" onClick={() => downloadPass(passBooking)}><Icon name="download" size={15} color="#fff" /> Download</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* HOUSEKEEPER SERVICE RATING MODAL */}
+      {ratingReq && (
+        <Modal onClose={() => setRatingReq(null)} width={460}>
+          <div className="fd-modal-inner" style={{ textAlign: "center" }}>
+            <ModalTitle
+              title="Rate Housekeeping Service"
+              sub={`Room ${ratingReq.room} · ${ratingReq.type}`}
+              onClose={() => setRatingReq(null)}
+            />
+            <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 14, padding: "16px", margin: "16px 0 18px", textAlign: "center" }}>
+              <div style={{ width: 52, height: 52, borderRadius: "50%", background: "var(--navy)", color: "var(--gold-light)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 700, margin: "0 auto 10px" }}>
+                {initials(ratingReq.assignedTo || "Anita Joseph")}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--charcoal-soft)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>Housekeeper who completed task</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)", marginTop: 2 }}>{ratingReq.assignedTo || "Anita Joseph"}</div>
+              <div style={{ fontSize: 12, color: "var(--green)", fontWeight: 600, marginTop: 4, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+                <Icon name="check" size={13} color="var(--green)" /> Service Completed Successfully
+              </div>
+            </div>
+
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--charcoal)", marginBottom: 8 }}>
+              Rate the service quality & timeliness
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "center", gap: 10, marginBottom: 12 }}>
+              {[1, 2, 3, 4, 5].map((star) => (
+                <button
+                  key={star}
+                  type="button"
+                  onClick={() => setRatingScore(star)}
+                  style={{
+                    background: "none", border: "none", cursor: "pointer", padding: "4px",
+                    transform: star <= ratingScore ? "scale(1.18)" : "scale(1)",
+                    transition: "transform 0.15s ease",
+                  }}
+                  title={`${star} Star${star > 1 ? "s" : ""}`}
+                >
+                  <Icon
+                    name="star"
+                    size={32}
+                    color={star <= ratingScore ? "var(--gold)" : "var(--line)"}
+                  />
+                </button>
+              ))}
+            </div>
+
+            <div style={{ fontSize: 13, fontWeight: 600, color: ratingScore >= 4 ? "var(--green)" : "var(--amber)", marginBottom: 16 }}>
+              {ratingScore === 5 ? "⭐⭐⭐⭐⭐ Outstanding Performance" :
+               ratingScore === 4 ? "⭐⭐⭐⭐ Very Good Service" :
+               ratingScore === 3 ? "⭐⭐⭐ Satisfactory" :
+               ratingScore === 2 ? "⭐⭐ Needs Attention" : "⭐ Poor Service"}
+            </div>
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center", marginBottom: 16 }}>
+              {["Prompt Response", "Clean & Tidy", "Courteous & Polite", "Attention to Detail", "Fast Completion"].map((tag) => {
+                const active = ratingTags.includes(tag);
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => setRatingTags(p => active ? p.filter(t => t !== tag) : [...p, tag])}
+                    style={{
+                      background: active ? "var(--navy)" : "var(--bg)",
+                      color: active ? "#fff" : "var(--charcoal)",
+                      border: `1px solid ${active ? "var(--navy)" : "var(--line)"}`,
+                      borderRadius: 16, padding: "5px 12px", fontSize: 11.5, fontWeight: 600, cursor: "pointer",
+                    }}
+                  >
+                    {tag}
+                  </button>
+                );
+              })}
+            </div>
+
+            <textarea
+              className="fd-input"
+              rows={2}
+              placeholder="Optional notes or feedback for the housekeeper..."
+              value={ratingComment}
+              onChange={(e) => setRatingComment(e.target.value)}
+              style={{ width: "100%", marginBottom: 18 }}
+            />
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                type="button"
+                className="fd-btn-outline"
+                style={{ flex: 1 }}
+                onClick={() => setRatingReq(null)}
+              >
+                Skip
+              </button>
+              <button
+                type="button"
+                className="fd-submit-btn"
+                style={{ flex: 2, margin: 0 }}
+                onClick={() => {
+                  setRequests(p => p.map(x => x.id === ratingReq.id ? { ...x, rating: ratingScore, ratingComment, ratingTags } : x));
+                  showToast(`Rating of ${ratingScore} stars recorded for ${ratingReq.assignedTo || "Anita Joseph"}!`);
+
+                  // Broadcast rating to Housekeeping dashboard
+                  const feedbackData = {
+                    id: ratingReq.id || `R-${Date.now()}`,
+                    room: ratingReq.room,
+                    type: ratingReq.type || "Room Cleaning",
+                    staff: ratingReq.assignedTo || "Anita Joseph",
+                    rating: ratingScore,
+                    comment: ratingComment || (ratingScore >= 4 ? "Excellent work! Room is spotless." : "Satisfactory service."),
+                    tags: ratingTags.length ? ratingTags : ["Clean & Tidy", "Prompt Response"],
+                    ts: Date.now(),
+                    time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                  };
+                  try {
+                    const prevRatings = JSON.parse(localStorage.getItem("veyra_hk_ratings_history") || "[]");
+                    localStorage.setItem("veyra_hk_ratings_history", JSON.stringify([feedbackData, ...prevRatings]));
+                    localStorage.setItem("veyra_hk_rating_feedback", JSON.stringify(feedbackData));
+                    window.dispatchEvent(new CustomEvent("veyra_rating_submitted", { detail: feedbackData }));
+                    frontdeskApi.rateHousekeeper({
+                      housekeeper: feedbackData.staff,
+                      room: feedbackData.room,
+                      rating: feedbackData.rating,
+                      comment: feedbackData.comment,
+                      tags: feedbackData.tags,
+                    }).catch(err => console.warn("Backend rating error:", err));
+                  } catch (e) {}
+
+                  setRatingReq(null);
+                }}
+              >
+                <Icon name="check" size={16} color="#fff" /> Submit Rating
+              </button>
             </div>
           </div>
         </Modal>

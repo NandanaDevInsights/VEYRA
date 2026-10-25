@@ -109,7 +109,19 @@ router.get('/invoices', async (req, res) => {
     sql += ' ORDER BY inv.invoice_id DESC';
 
     const invoices = await query(sql, params);
-    res.json({ success: true, invoices });
+    const payments = await query(`
+      SELECT payment_id AS id, invoice_id, booking_id, payment_type, method AS mode,
+             amount AS amt, transaction_ref AS ref,
+             DATE_FORMAT(paid_at, '%Y-%m-%d') AS date,
+             DATE_FORMAT(paid_at, '%H:%i') AS time,
+             'Paid' AS status
+      FROM payments ORDER BY paid_at ASC
+    `);
+    const invWithPayments = invoices.map(inv => ({
+      ...inv,
+      payments: payments.filter(p => p.invoice_id === inv.id)
+    }));
+    res.json({ success: true, invoices: invWithPayments });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -226,7 +238,7 @@ router.post('/invoices', async (req, res) => {
 
     // Link advance payments to this invoice
     if (booking_id && advanceDeducted > 0) {
-      await conn.query('UPDATE payments SET invoice_id = ? WHERE booking_id = ? AND payment_type = = "advance"', [invoiceId, booking_id]);
+      await conn.query('UPDATE payments SET invoice_id = ? WHERE booking_id = ? AND payment_type = "advance"', [invoiceId, booking_id]);
     }
 
     await conn.commit();
@@ -298,7 +310,7 @@ router.post('/payments', async (req, res) => {
   try {
     await conn.beginTransaction();
 
-    const { invoice_id, amount, method = 'cash', payment_type = 'payment' } = req.body;
+    const { invoice_id, amount, method = 'cash', payment_type = 'payment', transaction_ref } = req.body;
     const payAmount = parseFloat(amount);
 
     if (!invoice_id || isNaN(payAmount) || payAmount <= 0) {
@@ -328,9 +340,9 @@ router.post('/payments', async (req, res) => {
 
     // Insert payment
     const [payRes] = await conn.query(`
-      INSERT INTO payments (invoice_id, booking_id, payment_type, method, amount, received_by, paid_at)
-      VALUES (?, ?, ?, ?, ?, ?, NOW())
-    `, [invoice_id, inv.booking_id, payment_type, method, payAmount, req.user.user_id]);
+      INSERT INTO payments (invoice_id, booking_id, payment_type, method, amount, transaction_ref, received_by, paid_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+    `, [invoice_id, inv.booking_id, payment_type, method.toLowerCase(), payAmount, transaction_ref || (method.toLowerCase() === 'cash' ? 'CASH-REC' : `TXN-${Date.now().toString().slice(-6)}`), req.user.user_id]);
 
     // Update invoice amount_paid & status
     await conn.query(`
@@ -347,6 +359,13 @@ router.post('/payments', async (req, res) => {
       'payments',
       payRes.insertId,
       `Received Rs ${payAmount} (${method}) for ${inv.invoice_number}. New status: ${newStatus}.`
+    );
+
+    // Notification for all dashboards
+    await createNotification(
+      null,
+      'Payment Received',
+      `Payment of Rs ${payAmount} (${method}) received for invoice ${inv.invoice_number}. Status: ${newStatus}.`
     );
 
     res.json({
@@ -481,6 +500,149 @@ router.get('/activity', async (req, res) => {
       LIMIT 20
     `);
     res.json({ success: true, activity });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/billing/notifications
+router.get('/notifications', async (req, res) => {
+  try {
+    const notifications = await query(`
+      SELECT notification_id AS id, title, message, is_read,
+             DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') AS created_at
+      FROM notifications
+      WHERE user_id = ? OR user_id IS NULL
+      ORDER BY notification_id DESC
+      LIMIT 50
+    `, [req.user.user_id]);
+    res.json({ success: true, notifications: notifications.map(n => ({ ...n, is_read: Boolean(n.is_read) })) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/billing/salaries (Staff payroll, bonuses, incentives and points)
+router.get('/salaries', async (req, res) => {
+  try {
+    const salaries = await query(`
+      SELECT salary_id, employee_id, employee_name, designation, department,
+             basic_salary, allowances, bonus, points, deductions,
+             total_earnings, net_salary, period, status,
+             DATE_FORMAT(payment_date, '%Y-%m-%d') AS payment_date,
+             payment_method, transaction_ref,
+             DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') AS created_at
+      FROM employee_salaries
+      ORDER BY salary_id DESC
+    `);
+    res.json({ success: true, salaries });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/billing/salaries (Create/calculate new salary record)
+router.post('/salaries', async (req, res) => {
+  try {
+    const {
+      employee_id, employee_name, designation, department,
+      basic_salary = 0, allowances = 0, bonus = 0, points = 0, deductions = 0,
+      period = 'October 2026', payment_method = 'Bank Transfer'
+    } = req.body;
+
+    if (!employee_name || !designation) {
+      return res.status(400).json({ error: 'Employee name and designation are required.' });
+    }
+
+    const b = parseFloat(basic_salary) || 0;
+    const a = parseFloat(allowances) || 0;
+    const bo = parseFloat(bonus) || 0;
+    const d = parseFloat(deductions) || 0;
+    const pts = parseInt(points, 10) || 0;
+    const totEarn = b + a + bo;
+    const net = Math.max(0, totEarn - d);
+    const empId = employee_id || `EMP-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const result = await query(`
+      INSERT INTO employee_salaries
+        (employee_id, employee_name, designation, department, basic_salary, allowances, bonus, points, deductions, total_earnings, net_salary, period, status, payment_method)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?)
+    `, [empId, employee_name, designation, department || 'General', b, a, bo, pts, d, totEarn, net, period, payment_method]);
+
+    await logActivity(
+      req.user.user_id,
+      'Created Salary Record',
+      'employee_salaries',
+      result.insertId,
+      `Created payroll for ${employee_name} (${period}): Net Rs ${net}.`
+    );
+
+    res.json({ success: true, salary_id: result.insertId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/billing/salaries/:id (Update salary / incentives / points)
+router.put('/salaries/:id', async (req, res) => {
+  try {
+    const { basic_salary, allowances, bonus, points, deductions, status, payment_method } = req.body;
+    const existing = await query('SELECT * FROM employee_salaries WHERE salary_id = ?', [req.params.id]);
+    if (!existing.length) return res.status(404).json({ error: 'Salary record not found.' });
+
+    const prev = existing[0];
+    const b = basic_salary !== undefined ? parseFloat(basic_salary) : parseFloat(prev.basic_salary);
+    const a = allowances !== undefined ? parseFloat(allowances) : parseFloat(prev.allowances);
+    const bo = bonus !== undefined ? parseFloat(bonus) : parseFloat(prev.bonus);
+    const d = deductions !== undefined ? parseFloat(deductions) : parseFloat(prev.deductions);
+    const pts = points !== undefined ? parseInt(points, 10) : prev.points;
+    const st = status || prev.status;
+    const pm = payment_method || prev.payment_method;
+    const totEarn = b + a + bo;
+    const net = Math.max(0, totEarn - d);
+
+    await query(`
+      UPDATE employee_salaries
+      SET basic_salary = ?, allowances = ?, bonus = ?, points = ?, deductions = ?,
+          total_earnings = ?, net_salary = ?, status = ?, payment_method = ?
+      WHERE salary_id = ?
+    `, [b, a, bo, pts, d, totEarn, net, st, pm, req.params.id]);
+
+    res.json({ success: true, message: 'Salary record updated.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/billing/salaries/:id/disburse (Disburse / Mark salary as paid)
+router.post('/salaries/:id/disburse', async (req, res) => {
+  try {
+    const txnRef = `SAL-TXN-${Date.now().toString().slice(-6)}`;
+    await query(`
+      UPDATE employee_salaries
+      SET status = 'Paid', payment_date = CURDATE(), transaction_ref = ?
+      WHERE salary_id = ?
+    `, [txnRef, req.params.id]);
+
+    await logActivity(
+      req.user.user_id,
+      'Disbursed Salary',
+      'employee_salaries',
+      req.params.id,
+      `Disbursed salary for record #${req.params.id} (Txn: ${txnRef}).`
+    );
+
+    res.json({ success: true, transaction_ref: txnRef });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/billing/notifications/:id/read
+router.patch('/notifications/:id/read', async (req, res) => {
+  try {
+    await query('UPDATE notifications SET is_read = 1 WHERE notification_id = ?', [req.params.id]);
+    res.json({ success: true, message: 'Notification marked as read.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
