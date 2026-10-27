@@ -1087,3 +1087,228 @@
   padding: 0 14px;
   font-size: 13px;
 }
+
+/* ==========================================================================
+   ACTIVITY LOG - MODERN EXECUTIVE AUDIT TIMELINE
+   ========================================================================== */
+.ad-audit-container {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.ad-audit-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+.ad-audit-stat-card {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.ad-audit-stat-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+}
+
+.ad-audit-stat-val {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--navy-d);
+  line-height: 1.2;
+}
+
+.ad-audit-stat-lbl {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ad-audit-toolbar {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ad-audit-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ad-audit-search {
+  position: relative;
+  min-width: 240px;
+}
+
+.ad-audit-search input {
+  width: 100%;
+  height: 38px;
+  padding: 0 14px 0 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 13px;
+  background: #fafafa;
+}
+
+.ad-audit-search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.ad-audit-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.ad-audit-day-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ad-audit-day-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--navy);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.ad-audit-day-title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.ad-audit-card {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--card-accent, var(--navy));
+  border-radius: 10px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.ad-audit-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+.ad-audit-icon-badge {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--badge-bg, rgba(29, 44, 80, 0.06));
+  color: var(--card-accent, var(--navy));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.ad-audit-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ad-audit-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ad-audit-action-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--navy-d);
+}
+
+.ad-audit-dept-pill {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 99px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: var(--badge-bg, rgba(29, 44, 80, 0.08));
+  color: var(--card-accent, var(--navy));
+}
+
+.ad-audit-desc {
+  font-size: 13.5px;
+  color: #334155;
+  line-height: 1.45;
+  margin: 2px 0 6px;
+}
+
+.ad-audit-footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+
+.ad-audit-staff {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--navy);
+}
+
+.ad-audit-verified-seal {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: #059669;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #ecfdf5;
+  padding: 2px 7px;
+  border-radius: 4px;
+}

@@ -94,7 +94,12 @@ export function useLoginAction() {
         return false;
       }
     } catch (err) {
-      setError(err.message || "Invalid username or password.");
+      const msg = err.message || "";
+      if (msg.includes("502") || msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
+        setError("Connecting to server (502 Bad Gateway). Please retry in a moment.");
+      } else {
+        setError(msg || "Invalid username or password.");
+      }
       return false;
     }
   };

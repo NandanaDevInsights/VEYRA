@@ -7,7 +7,7 @@ const iso = (n = 0) => { const d = new Date(); d.setDate(d.getDate() + n); retur
 const fmtDay = (s) => new Date(s + "T00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 const inr = (n) => "₹" + Math.round(n).toLocaleString("en-IN");
 const stamp = () => new Date().toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
-const sum = (a, f) => a.reduce((t, x) => t + f(x), 0);
+const sum = (a, f) => (Array.isArray(a) ? a.reduce((t, x) => t + (Number(f(x)) || 0), 0) : 0);
 const CATS = ["Food", "Restaurant", "Room Service", "Laundry", "Minibar", "Extra Bed", "Extra Guest", "Transportation", "Spa", "Other"];
 const MODES = ["Cash", "Card", "UPI", "Bank Transfer", "Online Payment"];
 const LABEL = { paid: "Paid", partial: "Partially Paid", pending: "Payment Pending", overdue: "Overdue", disputed: "Disputed" };
@@ -21,18 +21,26 @@ const MAX_DISC = 10; // % a billing clerk may give without administrator approva
 const totals = (lines, svc, taxPct, disc, fee = 0) => {
   const subtotal = sum(lines, (l) => l.amt);
   const service = (subtotal * svc) / 100;
-  const discount = Math.min(subtotal, disc.type === "%" ? (subtotal * disc.val) / 100 : disc.val);
+  const discount = Math.min(subtotal, disc?.type === "%" ? (subtotal * disc.val) / 100 : (disc?.val || 0));
   const tax = ((subtotal + service - discount + fee) * taxPct) / 100;
   return { subtotal, service, discount, fee, tax, total: Math.round(subtotal + service - discount + fee + tax) };
 };
-const paidOf = (b) => sum(b.payments.filter((p) => p.status === "Paid"), (p) => p.amt);
-const balOf = (b) => b.total - paidOf(b);
-const statusOf = (b) => (balOf(b) <= 0 ? "paid" : b.disputed ? "disputed" : b.due < iso() ? "overdue" : paidOf(b) > 0 ? "partial" : "pending");
+const paidOf = (b) => (!b || !Array.isArray(b.payments) ? 0 : sum(b.payments.filter((p) => p.status === "Paid"), (p) => p.amt));
+const balOf = (b) => (!b ? 0 : Math.max(0, (Number(b.total) || 0) - paidOf(b)));
+const statusOf = (b) => (!b ? "pending" : balOf(b) <= 0 ? "paid" : b.disputed ? "disputed" : (b.due && b.due < iso()) ? "overdue" : paidOf(b) > 0 ? "partial" : "pending");
 const estOf = (g) => {
-  const n = Math.max(1, g.outD - g.inD);
-  return totals([{ amt: g.rate * n }, ...g.extras], 5, g.rate > 7500 ? 18 : 12, { type: "₹", val: 0 }).total;
+  if (!g) return 0;
+  const n = Math.max(1, (typeof g.outD === "number" ? g.outD : 0) - (typeof g.inD === "number" ? g.inD : -1));
+  const rate = Number(g.rate) || 2500;
+  const extras = Array.isArray(g.extras) ? g.extras : [];
+  return totals([{ amt: rate * n }, ...extras], 5, rate > 7500 ? 18 : 12, { type: "₹", val: 0 }).total;
 };
-const stageLabel = (g, b) => (g.stage === "done" ? "Checkout Completed" : g.stage === "billed" ? (balOf(b) <= 0 ? "Paid" : paidOf(b) > 0 ? "Partially Paid" : "Payment Pending") : g.outD === 0 ? "Checking Out Today" : "In House");
+const matchBill = (g, allBills) => {
+  if (!g) return null;
+  const list = allBills || [];
+  return list.find((b) => (b.guest && g.guest && b.guest.toLowerCase() === g.guest.toLowerCase()) || (b.room && g.room && Number(b.room) === Number(g.room)) || (b.bk && g.bk && b.bk === g.bk)) || null;
+};
+const stageLabel = (g, b) => (!g ? "Unknown" : g.stage === "done" ? "Checkout Completed" : g.stage === "billed" ? (b ? (balOf(b) <= 0 ? "Paid" : paidOf(b) > 0 ? "Partially Paid" : "Payment Pending") : "Payment Pending") : g.outD === 0 ? "Checking Out Today" : "In House");
 
 /* ---------- sample data (replace with API calls) ---------- */
 const X = (id, cat, desc, amt, at, by) => ({ id, cat, desc, amt, at, by });
@@ -266,9 +274,13 @@ const SALARIES0 = [
 function Billing({ onLogout, username }) {
   const [view, setView] = useState("overview"), [guests, setGuests] = useState(GUESTS0), [bills, setBills] = useState(BILLS0), [refunds, setRefunds] = useState(REF0);
   const [salaries, setSalaries] = useState(SALARIES0);
+  const [guestAccounts, setGuestAccounts] = useState([]);
+  const [selectedAcctData, setSelectedAcctData] = useState(null);
+  const [loadingAcct, setLoadingAcct] = useState(false);
   const [payDlg, setPayDlg] = useState(null);
   const [pendingTab, setPendingTab] = useState("all");
   const [acctSearch, setAcctSearch] = useState("");
+  const [expandedGuestId, setExpandedGuestId] = useState(null);
   const [hk, setHk] = useState([]), [notes, setNotes] = useState(NOTE0), [audits, setAudits] = useState([]);
   const [acts, setActs] = useState([["Invoice INV-1041 created", "Rohit Kurian · Room 203", "Meera Nair", "09:02", "Done"], ["Payment received from Room 205", "Divya Menon", "Meera Nair", "09:25", "Done"], ["New checkout billing request received", "Room 106", "Front desk", "08:40", "New"]]);
   const [startId, setStartId] = useState(""), [openNo, setOpenNo] = useState(null), [clock, setClock] = useState(new Date()), [q, setQ] = useState("");
@@ -297,6 +309,10 @@ function Billing({ onLogout, username }) {
         billingApi.getActivity(),
         billingApi.getSalaries(),
       ]);
+
+      if (gRes.status === "fulfilled" && gRes.value?.success && gRes.value.guests?.length) {
+        setGuestAccounts(gRes.value.guests);
+      }
 
       if (ntbRes.status === "fulfilled" && ntbRes.value?.success && ntbRes.value.list?.length) {
         const mappedGuests = ntbRes.value.list.map((item, idx) => ({
@@ -406,12 +422,71 @@ function Billing({ onLogout, username }) {
     }
   }, []);
 
+  const names = guestAccounts.length
+    ? guestAccounts.map((g) => g.name)
+    : [...new Set([...guests.map((g) => g.guest), ...bills.map((b) => b.guest)].filter(Boolean))];
+  const aName = acct || (names[0] || "");
+
   useEffect(() => {
     refreshData();
+    const interval = setInterval(refreshData, 4000);
+
+    const handleAnn = (data) => {
+      if (!data) return;
+      note("Announcement", `📢 Admin Announcement: ${data.title} - ${data.message}`);
+      toast(`📢 Admin Announcement: ${data.title}`, "warn");
+    };
+
+    const onAnnCustom = (e) => handleAnn(e.detail);
+    const onStorage = (e) => {
+      if (e.key === "veyra_announcement_broadcast" && e.newValue) {
+        try { handleAnn(JSON.parse(e.newValue)); } catch (err) {}
+      }
+      if (e.key === "veyra_checkout_settlement" && e.newValue) {
+        refreshData();
+      }
+      if (e.key === "veyra_new_charge_posted" || e.key === "veyra_payment_received") {
+        refreshData();
+      }
+    };
+
+    window.addEventListener("veyra_announcement_broadcast", onAnnCustom);
+    window.addEventListener("veyra_checkout_settlement", refreshData);
+    window.addEventListener("veyra_new_charge_posted", refreshData);
+    window.addEventListener("veyra_payment_received", refreshData);
+    window.addEventListener("storage", onStorage);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("veyra_announcement_broadcast", onAnnCustom);
+      window.removeEventListener("veyra_checkout_settlement", refreshData);
+      window.removeEventListener("veyra_new_charge_posted", refreshData);
+      window.removeEventListener("veyra_payment_received", refreshData);
+      window.removeEventListener("storage", onStorage);
+    };
   }, [refreshData]);
 
-  useEffect(() => { const t = setInterval(() => setClock(new Date()), 30000), l = setTimeout(() => setLoading(false), 500); return () => { clearInterval(t); clearTimeout(l); }; }, []);
-  if (loading) return <div className="bd"><p className="empty" style={{ padding: 60 }}>Loading billing data…</p></div>;
+  useEffect(() => {
+    const t = setInterval(() => setClock(new Date()), 30000);
+    const l = setTimeout(() => setLoading(false), 500);
+    return () => { clearInterval(t); clearTimeout(l); };
+  }, []);
+
+  useEffect(() => {
+    if (!aName) return;
+    const gObj = guestAccounts.find((g) => g.name === aName) || guests.find((g) => g.guest === aName);
+    if (gObj && gObj.id && Number.isInteger(Number(gObj.id))) {
+      setLoadingAcct(true);
+      billingApi.getGuestAccount(gObj.id)
+        .then((res) => {
+          if (res?.success) setSelectedAcctData(res);
+        })
+        .catch(() => {})
+        .finally(() => setLoadingAcct(false));
+    } else {
+      setSelectedAcctData(null);
+    }
+  }, [aName, guestAccounts, guests]);
 
   const admin = sys.admin;
   const toast = (msg, kind = "ok") => { const id = Math.random(); setToasts((t) => [...t, { id, msg, kind }]); setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3200); };
@@ -426,7 +501,7 @@ function Billing({ onLogout, username }) {
   const unsettled = bills.filter((b) => balOf(b) > 0), overdueB = unsettled.filter((b) => statusOf(b) === "overdue");
   const outstanding = sum(unsettled, (b) => balOf(b)), processing = allPays.filter((p) => p.status === "Processing");
   const live = guests.filter((g) => g.stage !== "done"), awaiting = guests.filter((g) => g.stage === "inhouse" || g.stage === "checkout");
-  const billOf = (g) => bills.find((b) => b.gid === g.id);
+  const billOf = (g) => matchBill(g, bills);
   const visNotes = notes.filter((n) => prefs[n.type] !== false), unread = visNotes.filter((n) => !n.read).length;
   const todayBills = bills.filter((b) => b.date === iso()), todayRef = refunds.filter((r) => r.status === "Processed" && r.date === iso());
 
@@ -607,13 +682,15 @@ function Billing({ onLogout, username }) {
   };
   const [rTitle, rCols, rRows] = REPS[rep.key];
   const exportCsv = () => { const csv = [rCols, ...rRows].map((r) => r.join(",")).join("\n"); const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = `${rep.key}-report.csv`; a.click(); toast("CSV exported"); };
-  const names = [...new Set([...guests.map((g) => g.guest), ...bills.map((b) => b.guest)])];
-  const aName = acct || names[0], aG = guests.find((g) => g.guest === aName), aB = bills.filter((b) => b.guest === aName), aR = refunds.filter((r) => aB.some((b) => b.no === r.no));
+  const aG = (guestAccounts && guestAccounts.find((g) => g.name === aName)) || guests.find((g) => g.guest === aName) || null;
+  const aB = bills.filter((b) => b.guest && aName && b.guest.toLowerCase() === aName.toLowerCase());
+  const aR = refunds.filter((r) => aB.some((b) => b.no === r.no));
   const openBill = bills.find((b) => b.no === openNo);
   const dateLabel = clock.toLocaleDateString("en-GB", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }), timeLabel = clock.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
 
   const GuestCard = ({ g }) => {
-    const b = billOf(g), today = g.outD === 0 && g.stage !== "done", nights = Math.max(1, g.outD - g.inD), extra = sum(g.extras, (e) => e.amt), [more, setMore] = useState(false);
+    const b = billOf(g), today = g.outD === 0 && g.stage !== "done", nights = Math.max(1, g.outD - g.inD), extra = sum(g.extras, (e) => e.amt);
+    const more = expandedGuestId === g.id;
     return (
       <div className={`gcard ${today ? "t-red" : "t-blue"}`} style={{ ...S.card, borderLeft: `5px solid ${today ? "#c0392b" : "#c9a227"}` }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><b className="mono" style={{ fontSize: "1.3rem" }}>{g.room}</b><Pill t={stageLabel(g, b)} tone={g.stage === "done" || (b && balOf(b) <= 0) ? "paid" : today ? "pending" : "partial"} /></div>
@@ -622,7 +699,7 @@ function Billing({ onLogout, username }) {
         <small>Room {inr(g.rate * nights)} · Services {inr(extra)} · <b>{b ? `Billed ${inr(b.total)}` : `Est. ${inr(estOf(g))}`}</b></small>
         {more && <ul className="lines">{g.extras.length ? g.extras.map((e) => <li key={e.id}><span>{e.cat} · {e.desc}<small className="block">{e.at} · {e.by}</small></span>{inr(e.amt)}</li>) : <li className="empty">No additional services.</li>}</ul>}
         <div style={S.acts}>
-          <button className="btn-line" onClick={() => go("accounts", () => setAcct(g.guest))}>View guest</button><button className="btn-line" onClick={() => setMore(!more)}>{more ? "Hide stay" : "View stay"}</button>
+          <button className="btn-line" onClick={() => go("accounts", () => setAcct(g.guest))}>View guest</button><button className="btn-line" onClick={() => setExpandedGuestId(more ? null : g.id)}>{more ? "Hide stay" : "View stay"}</button>
           {g.stage !== "done" && !b && <button className="btn-line" onClick={() => setDlg({ t: "charge", g })}>Add charges</button>}
           {!b && <button className="btn-gold" onClick={() => startBill(g.id)}>Create bill</button>}
           {b && <button className="btn-line" onClick={() => setOpenNo(b.no)}>View invoice</button>}
@@ -705,14 +782,19 @@ function Billing({ onLogout, username }) {
                 if (pf.when === "today" && !isToday) return false;
                 if (pf.when === "tomorrow" && b.due !== iso(1)) return false;
               }
-              if (pf.room && !String(b.room).includes(pf.room)) return false;
-              if (pf.guest && !b.guest.toLowerCase().includes(pf.guest.toLowerCase()) && !b.bk.toLowerCase().includes(pf.guest.toLowerCase())) return false;
+              if (pf.room && !String(b.room || "").includes(pf.room)) return false;
+              if (pf.guest) {
+                const qg = pf.guest.toLowerCase();
+                const matchGuest = b.guest && b.guest.toLowerCase().includes(qg);
+                const matchBk = b.bk && b.bk.toLowerCase().includes(qg);
+                if (!matchGuest && !matchBk) return false;
+              }
               return true;
             }).sort((a, b) => {
               if (pf.sort === "amount") return balOf(b) - balOf(a);
-              if (pf.sort === "due") return a.due < b.due ? -1 : 1;
+              if (pf.sort === "due") return (a.due || "") < (b.due || "") ? -1 : 1;
               if (pf.sort === "priority") return (statusOf(a) === "overdue" ? -1 : 1);
-              return a.room - b.room;
+              return (Number(a.room) || 0) - (Number(b.room) || 0);
             });
 
             return (
@@ -933,27 +1015,430 @@ function Billing({ onLogout, username }) {
             </div>
           </>)}
 
-          {view === "accounts" && (
-            <div className="cols">
-              <section className="panel"><p className="kicker">Guests</p><h3>Accounts</h3>
-                {!names.length ? <p className="empty">No guest accounts found.</p> : (
-                  <ul className="lines">{names.map((n) => <li key={n}><button className={`nav ${n === aName ? "is-on" : ""}`} style={{ width: "100%", color: "inherit" }} onClick={() => setAcct(n)}><span>{n}</span></button></li>)}</ul>
-                )}
-              </section>
-              <section className="panel"><p className="kicker">Financial history</p><h3>{aName || "Guest Account"}</h3>
-                {!aName ? <p className="empty">No guest account selected.</p> : (
-                  <>
-                    <p className="muted">{aG ? `${aG.phone} · ${aG.bk} · Room ${aG.room} (${aG.type}) · ${fmtDay(iso(aG.inD))} to ${fmtDay(iso(aG.outD))} · ${stageLabel(aG, billOf(aG))}` : "Guest account record"}</p>
-                    <dl className="calc"><dt>Room charges</dt><dd>{inr(sum(aB.flatMap((b) => b.lines.filter((l) => l.cat === "Room")), (l) => l.amt))}</dd><dt>Service charges</dt><dd>{inr(sum(aB.flatMap((b) => b.lines.filter((l) => l.cat !== "Room")), (l) => l.amt) + (aG && !billOf(aG) ? sum(aG.extras, (e) => e.amt) : 0))}</dd>
-                      <dt>Discounts</dt><dd>{inr(sum(aB, (b) => b.discount))}</dd><dt>Payments</dt><dd>{inr(sum(aB, paidOf))}</dd><dt>Refunds</dt><dd>{inr(sum(aR.filter((r) => r.status === "Processed"), (r) => r.amt))}</dd><dt className="grand">Outstanding</dt><dd className="grand">{inr(sum(aB, balOf))}</dd></dl>
-                    <h4>Invoice history</h4><BillTable rows={aB} onOpen={setOpenNo} empty="No invoices yet." />
-                    <h4>Previous bookings</h4><ul className="lines">{aB.length ? aB.map((b) => <li key={b.no}><span>{b.bk} · Room {b.room}</span><span>{fmtDay(b.date)}</span></li>) : <li className="empty">None.</li>}</ul>
-                    <h4>Payment history</h4><ul className="lines">{aB.flatMap((b) => b.payments).map((p) => <li key={p.id}><span>{p.id} · {p.mode}</span><b>{inr(p.amt)}</b></li>)}</ul>
-                  </>
-                )}
-              </section>
-            </div>
-          )}
+          {view === "accounts" && (() => {
+            const filteredAccountNames = names.filter((n) => !acctSearch || n.toLowerCase().includes(acctSearch.toLowerCase()));
+            const dbGuest = guestAccounts.find((g) => g.name === aName);
+            const curBookings = selectedAcctData?.bookings || (aG?.bk ? [{ booking_code: aG.bk, room_number: aG.room, type_name: aG.type, check_in_date: iso(aG.inD), check_out_date: iso(aG.outD), status: "Active" }] : []);
+            const curInvoices = (selectedAcctData?.invoices && selectedAcctData.invoices.length > 0)
+              ? selectedAcctData.invoices.map((inv) => {
+                  const invNum = inv.no || parseInt(String(inv.invoice_number || "").replace(/\D/g, ""), 10) || inv.invoice_id || inv.id;
+                  const matchingB = bills.find((b) => b.db_id === (inv.invoice_id || inv.id) || b.no === invNum);
+                  return {
+                    no: invNum,
+                    db_id: inv.invoice_id || inv.id,
+                    bk: inv.booking_code || matchingB?.bk || aG?.bk || "-",
+                    room: inv.room_number || matchingB?.room || aG?.room || "-",
+                    date: String(inv.created_at || matchingB?.date || iso()).slice(0, 10),
+                    due: String(inv.created_at || matchingB?.due || iso()).slice(0, 10),
+                    total: Number(inv.grand_total || matchingB?.total || 0),
+                    amount_paid: Number(inv.amount_paid || matchingB?.amount_paid || 0),
+                    payments: matchingB?.payments || [],
+                    lines: matchingB?.lines || [{ cat: "Room", desc: "Room Stay", qty: 1, rate: Number(inv.subtotal || 0), amt: Number(inv.subtotal || 0) }],
+                    status: inv.status || matchingB?.status || "issued",
+                  };
+                })
+              : aB;
+            const curPayments = (selectedAcctData?.payments && selectedAcctData.payments.length > 0)
+              ? selectedAcctData.payments.map((p) => ({
+                  id: p.payment_id ? `PAY-${p.payment_id}` : (p.id || "PAY-1"),
+                  invoiceNo: p.invoice_id || "-",
+                  amt: Number(p.amount || p.amt || 0),
+                  mode: (p.method || p.mode || "Cash").toUpperCase() === "UPI" ? "UPI" : (p.method || p.mode || "Cash"),
+                  date: String(p.paid_at || p.date || iso()).slice(0, 10),
+                  time: String(p.paid_at || "").slice(11, 16) || "10:00",
+                  status: "Paid",
+                }))
+              : aB.flatMap((b) => b.payments.map((p) => ({ ...p, invoiceNo: b.no })));
+            const curTotalBilled = dbGuest ? Number(dbGuest.total_billed) : sum(curInvoices, (b) => b.total);
+            const curTotalPaid = dbGuest ? Number(dbGuest.total_paid) : sum(curInvoices, paidOf);
+            const curBal = dbGuest ? Number(dbGuest.balance_due) : sum(curInvoices, balOf);
+
+            return (
+              <div className="cols" style={{ gridTemplateColumns: "300px 1fr", gap: 16 }}>
+                <section className="panel" style={{ padding: "20px 16px" }}>
+                  <p className="kicker">Guest Folios</p>
+                  <h3 style={{ marginBottom: 12 }}>Guest Accounts ({filteredAccountNames.length})</h3>
+                  <input
+                    placeholder="Search guest name..."
+                    value={acctSearch}
+                    onChange={(e) => setAcctSearch(e.target.value)}
+                    style={{ width: "100%", padding: "8px 12px", borderRadius: 8, border: "1px solid var(--line)", marginBottom: 12, fontSize: 13 }}
+                  />
+                  {!filteredAccountNames.length ? (
+                    <p className="empty">No guest accounts found.</p>
+                  ) : (
+                    <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 6, maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}>
+                      {filteredAccountNames.map((n) => {
+                        const gObj = guestAccounts.find((g) => g.name === n);
+                        const gInfo = guests.find((g) => g.guest === n);
+                        const gBills = bills.filter((b) => b.guest && b.guest.toLowerCase() === n.toLowerCase());
+                        const gBal = gObj ? Number(gObj.balance_due) : gBills.reduce((s, b) => s + (balOf(b) || 0), 0);
+                        const isSelected = n === aName;
+
+                        return (
+                          <li key={n}>
+                            <button
+                              onClick={() => setAcct(n)}
+                              style={{
+                                width: "100%", textAlign: "left", padding: "10px 12px", borderRadius: 10,
+                                border: `1.5px solid ${isSelected ? "var(--gold)" : "var(--line)"}`,
+                                background: isSelected ? "#fffbea" : "#fff",
+                                cursor: "pointer", transition: "all 0.15s"
+                              }}
+                            >
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                <b style={{ color: "var(--navy)", fontSize: 13.5 }}>{n}</b>
+                                {gBal > 0 ? (
+                                  <span style={{ fontSize: 11, background: "#fee2e2", color: "#b91c1c", fontWeight: 700, padding: "2px 7px", borderRadius: 10 }}>
+                                    Due: {inr(gBal)}
+                                  </span>
+                                ) : (
+                                  <span style={{ fontSize: 11, background: "#dcfce7", color: "#15803d", fontWeight: 700, padding: "2px 7px", borderRadius: 10 }}>
+                                    ✓ Settled
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ fontSize: 11.5, color: "var(--charcoal-soft)", marginTop: 4, display: "flex", justifyContent: "space-between" }}>
+                                <span>{gObj?.phone || gInfo?.phone || "Guest"}</span>
+                                {gInfo && <span>Room {gInfo.room}</span>}
+                              </div>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </section>
+
+                <section className="panel" style={{ padding: "24px 28px" }}>
+                  {!aName ? (
+                    <div style={{ textAlign: "center", padding: "40px 20px" }}>
+                      <p className="kicker">Financial History</p>
+                      <p className="empty">Select a guest to view their account details.</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 18 }}>
+                        <div>
+                          <p className="kicker">Guest Account & Folio</p>
+                          <h2 style={{ margin: "2px 0 6px", color: "var(--navy)", fontSize: "1.5rem" }}>{aName}</h2>
+                          <div style={{ fontSize: 12.5, color: "var(--charcoal-soft)", display: "flex", gap: 12, flexWrap: "wrap" }}>
+                            {(dbGuest?.phone || aG?.phone) && <span>📞 {dbGuest?.phone || aG?.phone}</span>}
+                            {(dbGuest?.email || aG?.email) && <span>✉️ {dbGuest?.email || aG?.email}</span>}
+                            {dbGuest?.address && <span>📍 {dbGuest.address}</span>}
+                            {dbGuest?.id_type && <span>🪪 {dbGuest.id_type}: {dbGuest.id_number}</span>}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                          {curBal > 0 && (
+                            <button
+                              className="btn-gold"
+                              style={{ padding: "8px 16px", fontWeight: 700, fontSize: 13 }}
+                              onClick={() => {
+                                const pendingB = curInvoices.find((b) => balOf(b) > 0) || aB.find((b) => balOf(b) > 0);
+                                if (pendingB) setPayDlg({ b: pendingB, amt: balOf(pendingB), mode: "Cash", ref: "" });
+                                else toast("No pending invoice found for this guest", "info");
+                              }}
+                            >
+                              + Record Payment
+                            </button>
+                          )}
+                          <button
+                            className="btn-line"
+                            style={{ padding: "8px 14px", fontSize: 13 }}
+                            onClick={() => {
+                              const gStay = guests.find((g) => g.guest && aName && g.guest.toLowerCase() === aName.toLowerCase());
+                              if (gStay) startBill(gStay.id);
+                              else go("create");
+                            }}
+                          >
+                            + New Invoice
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* KPI Summary Cards */}
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginBottom: 20 }}>
+                        <div style={{ background: "#f8f9fc", border: "1px solid var(--line)", borderTop: "3px solid #3b66b5", borderRadius: 10, padding: 12, textAlign: "center" }}>
+                          <div style={{ fontSize: 11, color: "var(--charcoal-soft)", fontWeight: 600 }}>Total Billed</div>
+                          <div style={{ fontSize: 17, fontWeight: 700, color: "#3b66b5", marginTop: 4 }}>{inr(curTotalBilled)}</div>
+                        </div>
+                        <div style={{ background: "#f8f9fc", border: "1px solid var(--line)", borderTop: "3px solid #2f7d55", borderRadius: 10, padding: 12, textAlign: "center" }}>
+                          <div style={{ fontSize: 11, color: "var(--charcoal-soft)", fontWeight: 600 }}>Total Paid</div>
+                          <div style={{ fontSize: 17, fontWeight: 700, color: "#2f7d55", marginTop: 4 }}>{inr(curTotalPaid)}</div>
+                        </div>
+                        <div style={{ background: "#f8f9fc", border: "1px solid var(--line)", borderTop: `3px solid ${curBal > 0 ? "#c0392b" : "#2f7d55"}`, borderRadius: 10, padding: 12, textAlign: "center" }}>
+                          <div style={{ fontSize: 11, color: "var(--charcoal-soft)", fontWeight: 600 }}>Outstanding Balance</div>
+                          <div style={{ fontSize: 17, fontWeight: 700, color: curBal > 0 ? "#c0392b" : "#2f7d55", marginTop: 4 }}>{inr(curBal)}</div>
+                        </div>
+                        <div style={{ background: "#f8f9fc", border: "1px solid var(--line)", borderTop: "3px solid var(--gold)", borderRadius: 10, padding: 12, textAlign: "center" }}>
+                          <div style={{ fontSize: 11, color: "var(--charcoal-soft)", fontWeight: 600 }}>Bookings</div>
+                          <div style={{ fontSize: 17, fontWeight: 700, color: "var(--navy)", marginTop: 4 }}>{curBookings.length || dbGuest?.total_bookings || 1}</div>
+                        </div>
+                      </div>
+
+                      {/* Invoices List */}
+                      <div style={{ marginBottom: 20 }}>
+                        <h4 style={{ color: "var(--navy)", borderBottom: "1px solid var(--line)", paddingBottom: 6, margin: "0 0 10px" }}>
+                          Invoices & Folios ({curInvoices.length})
+                        </h4>
+                        {!curInvoices.length ? (
+                          <p className="empty">No invoices generated for this guest account yet.</p>
+                        ) : (
+                          <div className="scroll">
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th>Invoice #</th>
+                                  <th>Booking</th>
+                                  <th>Room</th>
+                                  <th>Date</th>
+                                  <th className="r">Grand Total</th>
+                                  <th className="r">Paid</th>
+                                  <th className="r">Outstanding</th>
+                                  <th>Status</th>
+                                  <th className="r">Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {curInvoices.map((inv) => {
+                                  const invNum = inv.no || parseInt(String(inv.invoice_number || "").replace(/\D/g, ""), 10) || inv.id;
+                                  const invBal = balOf(inv);
+                                  const isUnsettled = invBal > 0;
+
+                                  return (
+                                    <tr key={invNum}>
+                                      <td className="mono"><b>INV-{invNum}</b></td>
+                                      <td className="mono">{inv.bk || "-"}</td>
+                                      <td className="mono"><b>{inv.room || "-"}</b></td>
+                                      <td>{fmtDay(String(inv.date || iso()).slice(0, 10))}</td>
+                                      <td className="r">{inr(inv.total)}</td>
+                                      <td className="r" style={{ color: "var(--green)" }}>{inr(paidOf(inv))}</td>
+                                      <td className="r"><b style={{ color: isUnsettled ? "#c0392b" : "inherit" }}>{inr(invBal)}</b></td>
+                                      <td><St s={statusOf(inv)} /></td>
+                                      <td className="r">
+                                        <span style={{ display: "inline-flex", gap: 6 }}>
+                                          {isUnsettled && (
+                                            <button
+                                              className="btn-gold"
+                                              style={{ padding: "4px 10px", fontSize: 12, fontWeight: 700 }}
+                                              onClick={() => setPayDlg({ b: inv, amt: invBal, mode: "Cash", ref: "" })}
+                                            >
+                                              + Pay
+                                            </button>
+                                          )}
+                                          <button
+                                            className="btn-line"
+                                            style={{ padding: "4px 10px", fontSize: 12 }}
+                                            onClick={() => setOpenNo(invNum)}
+                                          >
+                                            View Folio
+                                          </button>
+                                        </span>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Payment History */}
+                      <div style={{ marginBottom: 20 }}>
+                        <h4 style={{ color: "var(--navy)", borderBottom: "1px solid var(--line)", paddingBottom: 6, margin: "0 0 10px" }}>
+                          Payment History ({curPayments.length})
+                        </h4>
+                        {!curPayments.length ? (
+                          <p className="empty">No payments recorded for this guest account.</p>
+                        ) : (
+                          <div className="scroll">
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th>Payment Ref</th>
+                                  <th>Invoice #</th>
+                                  <th className="r">Amount</th>
+                                  <th>Method</th>
+                                  <th>Date & Time</th>
+                                  <th>Status</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {curPayments.map((p, idx) => (
+                                  <tr key={p.id || idx}>
+                                    <td className="mono"><b>{p.ref || p.id}</b></td>
+                                    <td className="mono">{p.invoiceNo ? `INV-${p.invoiceNo}` : "-"}</td>
+                                    <td className="r"><b style={{ color: "var(--green)" }}>{inr(p.amt)}</b></td>
+                                    <td>{p.mode}</td>
+                                    <td>{fmtDay(p.date)} {p.time}</td>
+                                    <td><span className="tag s-paid">✓ Paid</span></td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Booking History */}
+                      <div>
+                        <h4 style={{ color: "var(--navy)", borderBottom: "1px solid var(--line)", paddingBottom: 6, margin: "0 0 10px" }}>
+                          Booking History ({curBookings.length})
+                        </h4>
+                        {!curBookings.length ? (
+                          <p className="empty">No bookings found on record.</p>
+                        ) : (
+                          <div className="scroll">
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th>Booking Code</th>
+                                  <th>Room</th>
+                                  <th>Room Type</th>
+                                  <th>Check-in</th>
+                                  <th>Check-out</th>
+                                  <th className="r">Advance Paid</th>
+                                  <th>Status</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {curBookings.map((b, idx) => (
+                                  <tr key={b.booking_id || b.booking_code || idx}>
+                                    <td className="mono"><b>{b.booking_code || b.bk || "-"}</b></td>
+                                    <td className="mono">{b.room_number || b.room || "-"}</td>
+                                    <td>{b.type_name || b.type || "Room"}</td>
+                                    <td>{fmtDay(String(b.check_in_date || iso()).slice(0, 10))}</td>
+                                    <td>{fmtDay(String(b.check_out_date || iso()).slice(0, 10))}</td>
+                                    <td className="r">{inr(b.advance_amount || 0)}</td>
+                                    <td><span className="tag s-paid">{b.status || "Active"}</span></td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </section>
+              </div>
+            );
+          })()}
+
+          {view === "payroll" && (() => {
+            const totalPending = salaries.filter((s) => s.status === "Pending" || s.status === "Processing").length;
+            const totalPaid = salaries.filter((s) => s.status === "Paid").length;
+            const totalPayroll = salaries.reduce((sum, s) => sum + (parseFloat(s.net_salary) || 0), 0);
+            const pendingPayroll = salaries.filter((s) => s.status !== "Paid").reduce((sum, s) => sum + (parseFloat(s.net_salary) || 0), 0);
+            return (
+              <>
+                <div className="stats">
+                  <Stat label="Total Payroll" value={inr(totalPayroll)} sub={`${salaries.length} employees`} tone="blue" />
+                  <Stat label="Pending Disbursement" value={inr(pendingPayroll)} sub={`${totalPending} pending`} tone="warn" />
+                  <Stat label="Paid This Month" value={totalPaid} sub="Salaries disbursed" tone="green" />
+                  <Stat label="Processing" value={salaries.filter((s) => s.status === "Processing").length} sub="Under processing" tone="gold" />
+                </div>
+                <section className="panel">
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
+                    <div>
+                      <p className="kicker">Payroll Administration</p>
+                      <h3 style={{ margin: 0 }}>Staff Payroll & Incentives — {salaries[0]?.period || "Current Month"}</h3>
+                    </div>
+                  </div>
+                  <div className="scroll">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Employee</th>
+                          <th>ID</th>
+                          <th>Department</th>
+                          <th>Designation</th>
+                          <th className="r">Basic</th>
+                          <th className="r">Allowances</th>
+                          <th className="r">Bonus</th>
+                          <th className="r">Deductions</th>
+                          <th className="r">Net Salary</th>
+                          <th>Points</th>
+                          <th>Status</th>
+                          <th className="r">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {salaries.map((s) => (
+                          <tr key={s.salary_id} style={{ background: s.status === "Paid" ? "rgba(39,174,96,0.04)" : s.status === "Pending" ? "rgba(201,162,39,0.04)" : "transparent" }}>
+                            <td><b>{s.employee_name}</b></td>
+                            <td className="mono" style={{ fontSize: 12 }}>{s.employee_id}</td>
+                            <td>{s.department}</td>
+                            <td style={{ fontSize: 12 }}>{s.designation}</td>
+                            <td className="r">{inr(s.basic_salary)}</td>
+                            <td className="r" style={{ color: "var(--green)" }}>{inr(s.allowances)}</td>
+                            <td className="r" style={{ color: "#c9a227" }}>{inr(s.bonus)}</td>
+                            <td className="r" style={{ color: "#c0392b" }}>{inr(s.deductions)}</td>
+                            <td className="r"><b style={{ fontSize: 15 }}>{inr(s.net_salary)}</b></td>
+                            <td>
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#fffbea", border: "1px solid #f6c90e", borderRadius: 20, padding: "2px 10px", fontSize: 12, fontWeight: 700, color: "#856404" }}>
+                                ★ {s.points || 0}
+                              </span>
+                            </td>
+                            <td>
+                              {s.status === "Paid" ? (
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#dcfce7", border: "1px solid #22c55e", borderRadius: 20, padding: "2px 10px", fontSize: 12, fontWeight: 700, color: "#16a34a" }}>
+                                  ✓ Paid
+                                </span>
+                              ) : s.status === "Processing" ? (
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#dbeafe", border: "1px solid #3b82f6", borderRadius: 20, padding: "2px 10px", fontSize: 12, fontWeight: 700, color: "#1d4ed8" }}>
+                                  ⟳ Processing
+                                </span>
+                              ) : (
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#fef9c3", border: "1px solid #eab308", borderRadius: 20, padding: "2px 10px", fontSize: 12, fontWeight: 700, color: "#92400e" }}>
+                                  ⏳ Pending
+                                </span>
+                              )}
+                            </td>
+                            <td className="r">
+                              {s.status !== "Paid" && (
+                                <button
+                                  className="btn-gold"
+                                  style={{ padding: "6px 14px", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}
+                                  onClick={() => handleDisburseSalary(s.salary_id)}
+                                >
+                                  Disburse
+                                </button>
+                              )}
+                              {s.status === "Paid" && (
+                                <span style={{ fontSize: 11, color: "var(--charcoal-soft)" }}>
+                                  {s.payment_date ? `Paid ${s.payment_date}` : "Disbursed"}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {salaries.filter((s) => s.status !== "Paid").length > 0 && (
+                    <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
+                      <button
+                        className="btn-navy"
+                        style={{ padding: "10px 24px", fontWeight: 700 }}
+                        onClick={async () => {
+                          const pendingOnes = salaries.filter((s) => s.status !== "Paid");
+                          for (const s of pendingOnes) {
+                            await handleDisburseSalary(s.salary_id);
+                          }
+                          toast("All pending salaries disbursed!");
+                        }}
+                      >
+                        Disburse All Pending ({salaries.filter((s) => s.status !== "Paid").length})
+                      </button>
+                    </div>
+                  )}
+                </section>
+              </>
+            );
+          })()}
 
           {view === "reports" && (
             <section className="panel"><p className="kicker">Reports</p><h3>{rTitle}</h3>
@@ -999,6 +1484,81 @@ function Billing({ onLogout, username }) {
       </div>
 
       {openBill && <BillModal bill={openBill} admin={admin} toast={toast} onClose={() => setOpenNo(null)} onPay={recordPay} onVerify={(n, id) => setPay(n, id, "Paid")} onFail={(n, id) => setPay(n, id, "Failed")} onSend={send} onEdit={editBill} onCancel={cancelBill} onDispute={(n) => setBills(bills.map((b) => (b.no === n ? { ...b, disputed: !b.disputed } : b)))} />}
+
+      {payDlg && (
+        <div className="overlay" onClick={() => setPayDlg(null)}>
+          <div style={{ ...S.box, maxWidth: 460 }} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <p className="kicker" style={{ margin: 0 }}>Record Folio Payment</p>
+                <h3 style={{ margin: "4px 0 0" }}>Invoice INV-{payDlg.b.no}</h3>
+              </div>
+              <button className="x" onClick={() => setPayDlg(null)} style={{ border: 0, background: "none", fontSize: 24, cursor: "pointer", color: "var(--navy)" }}>×</button>
+            </div>
+
+            <div style={{ background: "#f8f6f0", padding: 14, borderRadius: 10, border: "1px solid var(--line)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                <span className="muted">Guest:</span> <b>{payDlg.b.guest}</b>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                <span className="muted">Room / Booking:</span> <b>Room {payDlg.b.room} · {payDlg.b.bk}</b>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                <span className="muted">Total Bill:</span> <b>{inr(payDlg.b.total)}</b>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                <span className="muted">Already Paid:</span> <b style={{ color: "var(--green)" }}>{inr(paidOf(payDlg.b))}</b>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px dashed var(--line)", paddingTop: 8, marginTop: 4 }}>
+                <span style={{ fontWeight: 700, color: "var(--navy)" }}>Balance Outstanding:</span>
+                <b style={{ color: "#c0392b", fontSize: 16 }}>{inr(balOf(payDlg.b))}</b>
+              </div>
+            </div>
+
+            <label className="fld">
+              Payment Method
+              <select value={payDlg.mode} onChange={(e) => setPayDlg({ ...payDlg, mode: e.target.value })}>
+                {MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </label>
+
+            <label className="fld">
+              Payment Amount (₹)
+              <input
+                type="number"
+                min="1"
+                max={balOf(payDlg.b)}
+                value={payDlg.amt}
+                onChange={(e) => setPayDlg({ ...payDlg, amt: Number(e.target.value) || "" })}
+              />
+            </label>
+
+            <label className="fld">
+              Transaction ID / Reference
+              <input
+                placeholder={payDlg.mode === "Cash" ? "Cash receipt reference (optional)" : "e.g. UPI Ref / Bank Auth Code"}
+                value={payDlg.ref || ""}
+                onChange={(e) => setPayDlg({ ...payDlg, ref: e.target.value })}
+              />
+            </label>
+
+            <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+              <button className="btn-line" onClick={() => setPayDlg(null)}>Cancel</button>
+              <button
+                className="btn-navy"
+                onClick={async () => {
+                  const payAmount = Number(payDlg.amt) || balOf(payDlg.b);
+                  if (payAmount <= 0) return toast("Enter a valid payment amount", "err");
+                  await recordPay(payDlg.b.no, { mode: payDlg.mode, amt: payAmount, ref: payDlg.ref });
+                  setPayDlg(null);
+                }}
+              >
+                Confirm Payment of {inr(Number(payDlg.amt) || balOf(payDlg.b))}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {dlg && (
         <div className="overlay" onClick={() => setDlg(null)}><div style={S.box} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>

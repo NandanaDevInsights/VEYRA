@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "concurrently \"npm run server\" \"vite\"",
     "dev:client": "vite",
-    "server": "node server/index.js",
-    "start": "node server/index.js",
+    "server": "php backend/run.php",
+    "server:node": "node server/index.js",
+    "start": "php backend/run.php",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"

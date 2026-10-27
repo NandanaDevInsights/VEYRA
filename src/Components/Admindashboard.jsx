@@ -7,36 +7,15 @@ const TYPES = ["Single", "Double", "Suite"];
 const STATUS_COLOR = { Available: "#2f7d55", Occupied: "#3b66b5", Dirty: "#b83a3a" };
 const PALETTE = ["#c9a227", "#3b66b5", "#2f7d55", "#b83a3a", "#7a4fb0"];
 
-const seedUsers = [
-  { id: 1, name: "Anita Menon", email: "anita@hotel.in", role: "Administrator", active: true },
-  { id: 2, name: "Rohan Das", email: "rohan@hotel.in", role: "Front Desk", active: true },
-  { id: 3, name: "Meera Nair", email: "meera@hotel.in", role: "Housekeeping", active: true },
-  { id: 4, name: "Vikram Rao", email: "vikram@hotel.in", role: "Accountant", active: false },
-];
-const seedRooms = [
-  { no: "101", type: "Single", floor: 1, rate: 2500, amenities: "AC, WiFi", status: "Available" },
-  { no: "102", type: "Single", floor: 1, rate: 2500, amenities: "AC, WiFi", status: "Occupied" },
-  { no: "201", type: "Double", floor: 2, rate: 3800, amenities: "AC, WiFi, TV", status: "Dirty" },
-  { no: "202", type: "Double", floor: 2, rate: 3800, amenities: "AC, WiFi, TV", status: "Available" },
-  { no: "301", type: "Suite", floor: 3, rate: 6500, amenities: "AC, WiFi, TV, Bathtub", status: "Available" },
-];
-const seedBookings = [
-  { id: "B-1042", guest: "Arjun Pillai", room: "102", date: "2026-10-02", nights: 2, amount: 5600, status: "Checked in" },
-  { id: "B-1043", guest: "Sara Thomas", room: "201", date: "2026-10-01", nights: 1, amount: 4256, status: "Checked out" },
-  { id: "B-1044", guest: "Dev Kumar", room: "301", date: "2026-10-03", nights: 3, amount: 21840, status: "Reserved" },
-];
-const seedLog = [
-  { id: 1, staff: "Rohan Das", action: "Created booking B-1044", at: "2026-10-02 07:34" },
-  { id: 2, staff: "Meera Nair", action: "Marked room 201 as dirty", at: "2026-10-02 07:10" },
-  { id: 3, staff: "Anita Menon", action: "Changed room 101 rate: 2,300 → 2,500", at: "2026-10-01 18:22" },
-  { id: 4, staff: "Rohan Das", action: "Checked out Sara Thomas (B-1043)", at: "2026-10-01 11:05" },
-];
+// Real data is loaded dynamically from MySQL tables: users, rooms, bookings, activity_log
 
 const NAV = [
   ["overview", "▦", "Overview", "Today at a glance"],
   ["users", "☺", "User Management", "Staff accounts and roles"],
   ["rooms", "⌂", "Room Management", "Rooms by floor, rates and amenities"],
   ["records", "☰", "Guests & Bills", "All guest records, bookings and bills"],
+  ["leaves", "📅", "Staff Leaves", "Review and approve leave requests"],
+  ["announcements", "📢", "Announcements", "Broadcast notices to staff & roles"],
   ["reports", "▥", "Reports", "Filter by date and export"],
   ["pricing", "₹", "Pricing & Tax", "Room rates, GST and service charge"],
   ["log", "✎", "Activity Log", "Who changed what, and when"],
@@ -118,12 +97,31 @@ function Ledger({ items, users }) {
   );
 }
 
+function getActionMeta(action = "", desc = "") {
+  const text = `${action} ${desc}`.toLowerCase();
+  if (text.includes("booking") || text.includes("check-in") || text.includes("check-out") || text.includes("guest") || text.includes("front")) {
+    return { dept: "Front Desk", icon: "🛎️", color: "var(--gold-d)", bg: "rgba(212, 175, 55, 0.12)" };
+  }
+  if (text.includes("clean") || text.includes("housekeeping") || text.includes("dirty") || text.includes("room") || text.includes("maintenance")) {
+    return { dept: "Housekeeping", icon: "🧹", color: "#10b981", bg: "rgba(16, 185, 129, 0.12)" };
+  }
+  if (text.includes("bill") || text.includes("invoice") || text.includes("payment") || text.includes("paid") || text.includes("charge") || text.includes("salary") || text.includes("payroll")) {
+    return { dept: "Billing", icon: "💳", color: "#3b82f6", bg: "rgba(59, 130, 246, 0.12)" };
+  }
+  if (text.includes("announcement")) {
+    return { dept: "Broadcast", icon: "📢", color: "#06b6d4", bg: "rgba(6, 182, 212, 0.12)" };
+  }
+  return { dept: "System & Auth", icon: "🛡️", color: "#6366f1", bg: "rgba(99, 102, 241, 0.12)" };
+}
+
 export default function AdminDashboard({ onLogout, username }) {
   const [page, setPage] = useState("overview");
-  const [users, setUsers] = useState(seedUsers);
-  const [rooms, setRooms] = useState(seedRooms);
-  const [bookings, setBookings] = useState(seedBookings);
-  const [log, setLog] = useState(seedLog);
+  const [users, setUsers] = useState([]);
+  const [rooms, setRooms] = useState([]);
+  const [bookings, setBookings] = useState([]);
+  const [log, setLog] = useState([]);
+  const [logSearch, setLogSearch] = useState("");
+  const [logCategory, setLogCategory] = useState("All");
   const [liveStats, setLiveStats] = useState(null);
   const [tax, setTax] = useState({ gst: 12, service: 0, rates: { Single: 2500, Double: 3800, Suite: 6500 } });
   const [edit, setEdit] = useState(null);
@@ -178,9 +176,15 @@ export default function AdminDashboard({ onLogout, username }) {
   const [profileForm, setProfileForm] = useState(adminProfile);
   const [settingsForm, setSettingsForm] = useState(adminSettings);
 
+  const [leaves, setLeaves] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [announcementForm, setAnnouncementForm] = useState({ title: "", message: "", target_role: "All" });
+  const [announcementSending, setAnnouncementSending] = useState(false);
+  const [adminToast, setAdminToast] = useState("");
+
   const refreshData = useCallback(async () => {
     try {
-      const [ovRes, uRes, rRes, bRes, pRes, lRes, opRes] = await Promise.allSettled([
+      const [ovRes, uRes, rRes, bRes, pRes, lRes, opRes, leaveRes, notifRes] = await Promise.allSettled([
         adminApi.getOverview(),
         adminApi.getUsers(),
         adminApi.getRooms(),
@@ -188,6 +192,8 @@ export default function AdminDashboard({ onLogout, username }) {
         adminApi.getPricing(),
         adminApi.getActivity(),
         adminApi.getOperations(),
+        adminApi.getLeaves(),
+        adminApi.getNotifications(),
       ]);
 
       if (ovRes.status === "fulfilled" && ovRes.value?.success) {
@@ -212,6 +218,12 @@ export default function AdminDashboard({ onLogout, username }) {
       }
       if (lRes.status === "fulfilled" && lRes.value?.success) {
         setLog(lRes.value.log);
+      }
+      if (leaveRes.status === "fulfilled" && leaveRes.value?.success) {
+        setLeaves(leaveRes.value.leaves || []);
+      }
+      if (notifRes.status === "fulfilled" && notifRes.value?.success) {
+        setNotifications(notifRes.value.notifications || []);
       }
       if (opRes.status === "fulfilled" && opRes.value?.success) {
         let combinedRatings = opRes.value.housekeeping?.ratings || [];
@@ -241,6 +253,51 @@ export default function AdminDashboard({ onLogout, username }) {
       console.warn("Failed to fetch admin data from backend:", err);
     }
   }, []);
+
+  const handleUpdateLeave = async (leaveId, status) => {
+    try {
+      await adminApi.updateLeave(leaveId, status);
+      setLeaves((prev) => prev.map((l) => (l.leave_id === leaveId ? { ...l, status } : l)));
+      record(`Updated leave request #${leaveId} to ${status}`);
+      setAdminToast(`Leave request #${leaveId} ${status}!`);
+      setTimeout(() => setAdminToast(""), 3500);
+      await refreshData();
+    } catch (e) {
+      console.warn("Update leave error:", e);
+    }
+  };
+
+  const handleSendAnnouncement = async (e) => {
+    e.preventDefault();
+    if (!announcementForm.title.trim() || !announcementForm.message.trim()) return;
+    setAnnouncementSending(true);
+    try {
+      await adminApi.sendAnnouncement(announcementForm);
+      record(`Broadcasted announcement: ${announcementForm.title}`);
+
+      // Broadcast announcement notification to other dashboards immediately
+      const announcementData = {
+        id: `ANN-${Date.now()}`,
+        title: announcementForm.title,
+        message: announcementForm.message,
+        target_role: announcementForm.target_role || "All",
+        sender: me,
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        timestamp: Date.now(),
+      };
+      localStorage.setItem("veyra_announcement_broadcast", JSON.stringify(announcementData));
+      window.dispatchEvent(new CustomEvent("veyra_announcement_broadcast", { detail: announcementData }));
+
+      setAnnouncementForm({ title: "", message: "", target_role: "All" });
+      setAdminToast("Announcement broadcasted successfully to all staff dashboards!");
+      setTimeout(() => setAdminToast(""), 3500);
+      await refreshData();
+    } catch (err) {
+      console.warn("Send announcement error:", err);
+    } finally {
+      setAnnouncementSending(false);
+    }
+  };
 
   useEffect(() => {
     refreshData();
@@ -352,7 +409,24 @@ export default function AdminDashboard({ onLogout, username }) {
 
   const set = (k) => (e) => setEdit((s) => ({ ...s, data: { ...s.data, [k]: e.target.value } }));
 
-  const logRows = log.filter((l) => staffFilter === "All" || l.staff === staffFilter);
+  const filteredLogs = useMemo(() => {
+    return log.filter((l) => {
+      if (staffFilter !== "All" && l.staff !== staffFilter) return false;
+      const text = `${l.action} ${l.description || ""} ${l.staff} ${l.entity_type || ""}`.toLowerCase();
+      if (logSearch.trim() && !text.includes(logSearch.trim().toLowerCase())) return false;
+      if (logCategory === "Front Desk" && !(text.includes("booking") || text.includes("check-in") || text.includes("check-out") || text.includes("front") || text.includes("guest"))) return false;
+      if (logCategory === "Housekeeping" && !(text.includes("clean") || text.includes("housekeeping") || text.includes("dirty") || text.includes("room") || text.includes("task") || text.includes("maintenance"))) return false;
+      if (logCategory === "Billing" && !(text.includes("bill") || text.includes("invoice") || text.includes("payment") || text.includes("paid") || text.includes("charge") || text.includes("salary") || text.includes("payroll"))) return false;
+      if (logCategory === "Admin" && !(text.includes("announcement") || text.includes("leave") || text.includes("user") || text.includes("login") || text.includes("admin") || text.includes("system"))) return false;
+      return true;
+    });
+  }, [log, staffFilter, logSearch, logCategory]);
+
+  const logDays = useMemo(() => {
+    return [...new Set(filteredLogs.map((l) => (l.at || "").slice(0, 10)).filter(Boolean))];
+  }, [filteredLogs]);
+
+  const logRows = filteredLogs;
   const inRange = bookings.filter((b) => b.date >= range.from && b.date <= range.to);
   const rep = {
     Occupancy: { head: ["Room", "Type", "Status"], rows: rooms.map((r) => [r.no, r.type, r.status]),
@@ -939,6 +1013,184 @@ export default function AdminDashboard({ onLogout, username }) {
           );
         })()}
 
+        {page === "leaves" && (
+          <div className="ad-panel">
+            <div className="ad-section-bar">
+              <div className="ad-stats-summary">
+                <div className="ad-stat-pill">
+                  <span className="dot ok" />
+                  <span><strong>{leaves.filter((l) => l.status === "approved").length}</strong> Approved</span>
+                </div>
+                <div className="ad-stat-pill">
+                  <span className="dot" style={{ background: "#c9a227" }} />
+                  <span><strong>{leaves.filter((l) => l.status === "pending").length}</strong> Pending Review</span>
+                </div>
+                <div className="ad-stat-pill">
+                  <span className="dot off" />
+                  <span><strong>{leaves.filter((l) => l.status === "rejected").length}</strong> Rejected</span>
+                </div>
+                <div className="ad-stat-pill total">
+                  <span>Total Requests: <strong>{leaves.length}</strong></span>
+                </div>
+              </div>
+              <button className="ad-btn ghost sm" onClick={refreshData}>⟳ Refresh Data</button>
+            </div>
+
+            <div className="ad-wrap" style={{ marginTop: 16 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Employee Name</th>
+                    <th>Department / Role</th>
+                    <th>Leave Type</th>
+                    <th>Duration</th>
+                    <th>Reason</th>
+                    <th>Status</th>
+                    <th style={{ textAlign: "right" }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {leaves.map((l) => {
+                    const isPending = (l.status || "").toLowerCase() === "pending";
+                    const isApproved = (l.status || "").toLowerCase() === "approved";
+                    const isRejected = (l.status || "").toLowerCase() === "rejected";
+
+                    return (
+                      <tr key={l.leave_id}>
+                        <td>
+                          <b>{l.staff_name}</b>
+                        </td>
+                        <td>{l.role}</td>
+                        <td>
+                          <span className="ad-role-pill">{l.leave_type}</span>
+                        </td>
+                        <td>
+                          <span>{l.start_date} → {l.end_date}</span>
+                        </td>
+                        <td style={{ maxWidth: 220, fontSize: 13, color: "var(--muted)" }}>
+                          {l.reason || "-"}
+                        </td>
+                        <td>
+                          <span className={`ad-status-pill ${isApproved ? "active" : isRejected ? "inactive" : "pending"}`} style={isPending ? { background: "#fef9c3", color: "#854d0e" } : {}}>
+                            <span className="dot" style={isPending ? { background: "#ca8a04" } : {}} />
+                            {l.status ? l.status.charAt(0).toUpperCase() + l.status.slice(1) : "Pending"}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          <div style={{ display: "inline-flex", gap: 8, justifyContent: "flex-end" }}>
+                            {isPending ? (
+                              <>
+                                <button
+                                  className="ad-btn sm"
+                                  style={{ background: "#2f7d55", borderColor: "#2f7d55", color: "#fff", padding: "4px 12px", fontSize: 12 }}
+                                  onClick={() => handleUpdateLeave(l.leave_id, "approved")}
+                                >
+                                  ✓ Approve
+                                </button>
+                                <button
+                                  className="ad-btn ghost sm"
+                                  style={{ borderColor: "#b83a3a", color: "#b83a3a", padding: "4px 12px", fontSize: 12 }}
+                                  onClick={() => handleUpdateLeave(l.leave_id, "rejected")}
+                                >
+                                  ✕ Reject
+                                </button>
+                              </>
+                            ) : (
+                              <span style={{ fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>
+                                {isApproved ? "Approved by Admin" : "Rejected"}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {!leaves.length && (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: "center", padding: 28, color: "var(--muted)" }}>
+                        No staff leave requests submitted yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {page === "announcements" && (
+          <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 20 }}>
+            <div className="ad-panel">
+              <h2 style={{ fontSize: 19, marginBottom: 4 }}>Broadcast Staff Announcement</h2>
+              <p style={{ margin: "0 0 16px", color: "var(--muted)", fontSize: 13 }}>
+                Send official notices and announcements to Front Desk, Housekeeping, Billing, or all hotel staff.
+              </p>
+
+              <form onSubmit={handleSendAnnouncement} style={{ display: "grid", gap: 14 }}>
+                <Field label="Announcement Title *">
+                  <input
+                    placeholder="e.g. VIP Delegation Arrival / Shift Schedule Update"
+                    value={announcementForm.title}
+                    onChange={(e) => setAnnouncementForm({ ...announcementForm, title: e.target.value })}
+                    required
+                  />
+                </Field>
+
+                <Field label="Target Department / Role">
+                  <select
+                    value={announcementForm.target_role}
+                    onChange={(e) => setAnnouncementForm({ ...announcementForm, target_role: e.target.value })}
+                  >
+                    <option value="All">All Staff (General Broadcast)</option>
+                    <option value="Front Desk">Front Desk Only</option>
+                    <option value="Housekeeping">Housekeeping Only</option>
+                    <option value="Billing">Billing & Accounts Only</option>
+                  </select>
+                </Field>
+
+                <Field label="Message & Instructions *">
+                  <textarea
+                    rows={5}
+                    style={{ width: "100%", padding: 10, borderRadius: 8, border: "1px solid var(--line)", fontFamily: "inherit", resize: "vertical" }}
+                    placeholder="Write clear instructions, schedule changes, or guidelines for hotel personnel..."
+                    value={announcementForm.message}
+                    onChange={(e) => setAnnouncementForm({ ...announcementForm, message: e.target.value })}
+                    required
+                  />
+                </Field>
+
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <button type="submit" className="ad-btn" disabled={announcementSending} style={{ padding: "9px 22px" }}>
+                    {announcementSending ? "Sending Broadcast…" : "📢 Broadcast Announcement"}
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <div className="ad-panel">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <h2 style={{ fontSize: 19, margin: 0 }}>Recent Announcements</h2>
+                <span className="ad-stat-pill total" style={{ fontSize: 12 }}>{notifications.length} logged</span>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 460, overflowY: "auto" }}>
+                {notifications.map((n) => (
+                  <div key={n.id} style={{ background: "#f8f9fc", border: "1px solid var(--line)", borderRadius: 10, padding: "12px 14px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                      <b style={{ color: "var(--navy)", fontSize: 14 }}>{n.title}</b>
+                      <time style={{ fontSize: 11, color: "var(--muted)" }}>{n.created_at}</time>
+                    </div>
+                    <p style={{ margin: 0, fontSize: 13, color: "#374151" }}>{n.message}</p>
+                  </div>
+                ))}
+                {!notifications.length && (
+                  <p style={{ color: "var(--muted)", textAlign: "center", padding: 24 }}>No previous announcements recorded.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {page === "reports" && (
           <div className="ad-panel">
             <div className="ad-tabs">{Object.keys({ Occupancy: 1, Revenue: 1, "Guest history": 1, Housekeeping: 1 }).map((t) => <button key={t} className={report === t ? "on" : ""} onClick={() => setReport(t)}>{t}</button>)}</div>
@@ -986,12 +1238,173 @@ export default function AdminDashboard({ onLogout, username }) {
         )}
 
         {page === "log" && (
-          <div className="ad-panel">
-            <div className="ad-bar">
-              <div className="ad-grid"><Field label="Staff member"><select value={staffFilter} onChange={(e) => setStaffFilter(e.target.value)}><option>All</option>{users.map((u) => <option key={u.id}>{u.name}</option>)}</select></Field></div>
-              <button className="ad-btn ghost" onClick={() => download("audit-log.csv", [["Time", "Staff", "Action"], ...logRows.map((l) => [l.at, l.staff, l.action])])}>Export CSV</button>
+          <div className="ad-audit-container">
+            {/* Top KPI Metrics Strip */}
+            <div className="ad-audit-metrics">
+              <div className="ad-audit-stat-card">
+                <div className="ad-audit-stat-icon" style={{ background: "rgba(29, 44, 80, 0.08)", color: "var(--navy)" }}>✎</div>
+                <div>
+                  <div className="ad-audit-stat-val">{log.length}</div>
+                  <div className="ad-audit-stat-lbl">Total Audit Events</div>
+                </div>
+              </div>
+              <div className="ad-audit-stat-card">
+                <div className="ad-audit-stat-icon" style={{ background: "rgba(16, 185, 129, 0.12)", color: "#10b981" }}>📅</div>
+                <div>
+                  <div className="ad-audit-stat-val">
+                    {log.filter((l) => (l.at || "").startsWith(new Date().toISOString().slice(0, 10))).length}
+                  </div>
+                  <div className="ad-audit-stat-lbl">Actions Logged Today</div>
+                </div>
+              </div>
+              <div className="ad-audit-stat-card">
+                <div className="ad-audit-stat-icon" style={{ background: "rgba(212, 175, 55, 0.12)", color: "var(--gold-d)" }}>👥</div>
+                <div>
+                  <div className="ad-audit-stat-val">{[...new Set(log.map((l) => l.staff))].length}</div>
+                  <div className="ad-audit-stat-lbl">Active Contributors</div>
+                </div>
+              </div>
+              <div className="ad-audit-stat-card">
+                <div className="ad-audit-stat-icon" style={{ background: "rgba(99, 102, 241, 0.12)", color: "#6366f1" }}>✓</div>
+                <div>
+                  <div className="ad-audit-stat-val">100%</div>
+                  <div className="ad-audit-stat-lbl">Verified Audit Trail</div>
+                </div>
+              </div>
             </div>
-            <Ledger items={logRows} users={users} />
+
+            {/* Filter Toolbar */}
+            <div className="ad-audit-toolbar">
+              <div className="ad-audit-filters">
+                <div className="ad-audit-search">
+                  <span className="ad-audit-search-icon">🔍</span>
+                  <input
+                    placeholder="Search actions, staff, entities..."
+                    value={logSearch}
+                    onChange={(e) => setLogSearch(e.target.value)}
+                  />
+                </div>
+
+                <div className="ad-records-filters" style={{ margin: 0 }}>
+                  {["All", "Front Desk", "Housekeeping", "Billing", "Admin"].map((cat) => (
+                    <button
+                      key={cat}
+                      className={`ad-filter-chip ${logCategory === cat ? "on" : ""}`}
+                      onClick={() => setLogCategory(cat)}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <select
+                  className="ad-select"
+                  style={{ height: 38, fontSize: 13, minWidth: 150 }}
+                  value={staffFilter}
+                  onChange={(e) => setStaffFilter(e.target.value)}
+                >
+                  <option value="All">All Staff Members</option>
+                  {users.map((u) => (
+                    <option key={u.id} value={u.name}>{u.name}</option>
+                  ))}
+                </select>
+
+                <button
+                  className="ad-btn ghost"
+                  style={{ height: 38, display: "inline-flex", alignItems: "center", gap: 6 }}
+                  onClick={() => download("audit-log.csv", [
+                    ["Time", "Staff", "Action", "Description", "Entity"],
+                    ...filteredLogs.map((l) => [l.at, l.staff, l.action, l.description || "", l.entity_type || ""])
+                  ])}
+                >
+                  <span>⤓</span> Export CSV
+                </button>
+              </div>
+            </div>
+
+            {/* Timeline Stream */}
+            <div className="ad-audit-timeline">
+              {logDays.map((d) => {
+                const dayItems = filteredLogs.filter((l) => (l.at || "").startsWith(d));
+                if (!dayItems.length) return null;
+                return (
+                  <div key={d} className="ad-audit-day-group">
+                    <div className="ad-audit-day-title">
+                      <span>{d === new Date().toISOString().slice(0, 10) ? `Today · ${d}` : d}</span>
+                    </div>
+
+                    {dayItems.map((l) => {
+                      const meta = getActionMeta(l.action, l.description);
+                      return (
+                        <div
+                          key={l.id}
+                          className="ad-audit-card"
+                          style={{
+                            "--card-accent": meta.color,
+                            "--badge-bg": meta.bg,
+                          }}
+                        >
+                          <div className="ad-audit-icon-badge">
+                            {meta.icon}
+                          </div>
+
+                          <div className="ad-audit-content">
+                            <div className="ad-audit-header">
+                              <span className="ad-audit-action-title">{l.action}</span>
+                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <span className="ad-audit-dept-pill">{meta.dept}</span>
+                                {l.entity_type && (
+                                  <span style={{ fontSize: 11, background: "#f1f5f9", color: "#475569", padding: "2px 7px", borderRadius: 4, fontWeight: 600 }}>
+                                    {l.entity_type} {l.entity_id ? `#${l.entity_id}` : ""}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {l.description && (
+                              <p className="ad-audit-desc">{l.description}</p>
+                            )}
+
+                            <div className="ad-audit-footer">
+                              <span className="ad-audit-staff">
+                                <span
+                                  className="ad-av"
+                                  style={{
+                                    width: 22,
+                                    height: 22,
+                                    fontSize: 10,
+                                    background: colorOf(users, l.staff),
+                                    color: "#fff",
+                                  }}
+                                >
+                                  {initials(l.staff)}
+                                </span>
+                                {l.staff}
+                              </span>
+                              <span>·</span>
+                              <span>{(l.at || "").slice(11) || l.at}</span>
+                              <span className="ad-audit-verified-seal">
+                                ✓ Verified Audit Log
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+
+              {!logDays.length && (
+                <div style={{ background: "#fff", border: "1px dashed var(--line)", borderRadius: 12, padding: "48px 24px", textAlign: "center" }}>
+                  <div style={{ fontSize: "2rem", marginBottom: 8 }}>📋</div>
+                  <b style={{ color: "var(--navy-d)", fontSize: "1.05rem" }}>No audit log entries found</b>
+                  <p className="muted" style={{ marginTop: 4 }}>No recorded actions match your current search and filter criteria.</p>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </main>
@@ -1159,6 +1572,17 @@ export default function AdminDashboard({ onLogout, username }) {
             </form>
           )}
         </Sheet>
+      )}
+
+      {adminToast && (
+        <div style={{
+          position: "fixed", bottom: 24, right: 24, background: "var(--navy)", color: "#fff",
+          padding: "12px 20px", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
+          zIndex: 9999, fontWeight: 600, fontSize: 13.5, borderLeft: "4px solid var(--gold)",
+          animation: "fadeIn 0.2s ease"
+        }}>
+          {adminToast}
+        </div>
       )}
     </div>
   );

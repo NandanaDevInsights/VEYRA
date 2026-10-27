@@ -41,16 +41,10 @@ const all13 = CHECKLIST.map((_, i) => i);
 const ME = "HK-1042";
 const R = (id, rt, status, tt, o = {}) => ({ id, rt, status, tt, prio: "Normal", g: "", stay: "Vacant", inst: "", by: null, checked: [], issue: null, created: "07:30", due: "11:00", ...o });
 const ROOMS0 = [
-  R(101, "Deluxe", "inspection", "Checkout Cleaning", { by: ME, g: "Mr. Rao", stay: "Checked out 10:30", checked: all13, created: "07:15", due: "10:45" }),
-  R(102, "Standard", "progress", "Stayover Cleaning", { by: ME, g: "Ms. Iyer", stay: "Staying", inst: "Extra pillow requested", checked: [0, 1, 2, 3] }),
-  R(105, "Suite", "assigned", "Quick Turnaround", { by: ME, prio: "High", g: "Mr. Menon", stay: "Arrival 11:00", inst: "Early arrival. Prioritise.", due: "10:30" }),
-  R(108, "Deluxe", "assigned", "Checkout Cleaning", { by: ME, g: "Ms. Das", stay: "Checked out 09:50", due: "12:00" }),
-  R(110, "Standard", "maintenance", "Maintenance Follow-up", { by: ME, due: "13:00", issue: "AC problem" }),
-  R(203, "Standard", "assigned", "Stayover Cleaning", { by: ME, g: "Mr. Khan", stay: "Staying", inst: "Do not disturb before 10:00", due: "12:30" }),
-  R(206, "Suite", "assigned", "Deep Cleaning", { by: ME, prio: "High", g: "VIP Mr. Nair", stay: "Arrival 15:00", inst: "Fresh flowers", due: "14:00" }),
-  R(104, "Standard", "available"), R(107, "Deluxe", "occupied", null, { g: "Ms. Pillai", stay: "Staying" }), R(109, "Standard", "dnd", null, { g: "Mr. Shah", stay: "Staying" }),
-  R(201, "Deluxe", "occupied", null, { g: "Mr. Thomas", stay: "Staying" }), R(204, "Suite", "required", "Checkout Cleaning", { prio: "High", g: "Ms. Fernandez", stay: "Checked out 10:00" }),
-  R(207, "Standard", "ooo"), R(301, "Suite", "ready"), R(302, "Deluxe", "required", "Checkout Cleaning", { g: "Mr. Bose", stay: "Checked out 10:15" }),
+  R(101, "Deluxe", "progress", "Checkout Deep Clean", { by: ME, isAssignedToHousekeeping: true, stay: "Checked out", checked: [0, 1, 2], created: "07:15", due: "10:45" }),
+  R(102, "Standard", "assigned", "Checkout Deep Clean", { by: ME, isAssignedToHousekeeping: true, stay: "Checked out", checked: [] }),
+  R(201, "Deluxe", "ready", "Checkout Deep Clean", { by: ME, isAssignedToHousekeeping: true, stay: "Checked out", checked: all13 }),
+  R(301, "Suite", "required", "Checkout Deep Clean", { by: ME, isAssignedToHousekeeping: true, prio: "High", stay: "Checked out", checked: [] }),
 ];
 const REQ0 = [
   { id: "SR-101", room: 204, guest: "Ms. Fernandez", type: "Extra towel", prio: "Normal", by: null, status: "New", time: "09:10", done: "" },
@@ -111,7 +105,16 @@ export default function HousekeepingDashboard({ onLogout, username }) {
   const [view, setView] = useState("dashboard"), [ptab, setPtab] = useState("view"), [menu, setMenu] = useState(false), [modal, setModal] = useState(null), [out, setOut] = useState(false);
   const [toasts, setToasts] = useState([]), [rooms, setRooms] = useState(ROOMS0), [notes, setNotes] = useState(NOTE0);
   const [acts, setActs] = useState([["Room 102 cleaned", "08:15"], ["Room 105 assigned", "07:55"], ["Service request received", "09:10"], ["Room 110 marked for maintenance", "08:05"], ["Guest checkout received: Room 108", "07:40"]]);
-  const [reqs, setReqs] = useState(REQ0), [comps, setComps] = useState(COMP0), [sup, setSup] = useState(SUP0), [cart, setCart] = useState({}), [sreqs, setSreqs] = useState([]);
+  const [reqs, setReqs] = useState(() => {
+    try {
+      const saved = localStorage.getItem("veyra_hk_service_requests");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return REQ0;
+  }), [comps, setComps] = useState(COMP0), [sup, setSup] = useState(SUP0), [cart, setCart] = useState({}), [sreqs, setSreqs] = useState([]);
   const [issues, setIssues] = useState([{ id: "I-1", room: 110, type: "AC problem", desc: "AC not cooling", prio: "High", at: "08:05", status: "Open" }]);
   const [rfilter, setRfilter] = useState("all"), [open, setOpen] = useState(null), [replies, setReplies] = useState({});
   const nowLocal = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
@@ -146,25 +149,108 @@ export default function HousekeepingDashboard({ onLogout, username }) {
 
   const refreshData = useCallback(async () => {
     try {
-      const [rRes, srRes, cRes, supRes, attRes, lRes, nRes] = await Promise.allSettled([
+      const [rRes, tRes, srRes, cRes, supRes, attRes, lRes, nRes, ratRes] = await Promise.allSettled([
         housekeepingApi.getRooms(),
+        housekeepingApi.getTasks(),
         housekeepingApi.getServiceRequests(),
         housekeepingApi.getComplaints(),
         housekeepingApi.getSupplies(),
         housekeepingApi.getAttendance(),
         housekeepingApi.getLeave(),
         housekeepingApi.getNotifications(),
+        housekeepingApi.getRatings(),
       ]);
 
       if (rRes.status === "fulfilled" && rRes.value?.success && rRes.value.rooms?.length) {
+        const dbTasks = (tRes.status === "fulfilled" && tRes.value?.success && tRes.value.tasks) ? tRes.value.tasks : [];
+        const dbReqs = (srRes.status === "fulfilled" && srRes.value?.success && srRes.value.requests) ? srRes.value.requests : [];
+
+        // Collect room numbers with service requests raised from Front Desk
+        const srRoomSet = new Set(dbReqs.map((sr) => String(sr.room_number || "")));
+
+        const taskMapByRoom = {};
+        dbTasks.forEach((t) => {
+          const existing = taskMapByRoom[t.room_number];
+          if (!existing) {
+            taskMapByRoom[t.room_number] = t;
+          } else {
+            // Prioritize in_progress > pending/assigned > completed
+            if (existing.status === "in_progress") return;
+            if (t.status === "in_progress") {
+              taskMapByRoom[t.room_number] = t;
+            } else if (existing.status === "pending" || existing.status === "assigned") {
+              return;
+            } else if (t.status === "pending" || t.status === "assigned") {
+              taskMapByRoom[t.room_number] = t;
+            }
+          }
+        });
+
         const mappedRooms = rRes.value.rooms.map((rm) => {
-          let st = "available";
+          const t = taskMapByRoom[rm.no];
+          let st = "ready";
+          let prio = "Normal";
+          let taskId = t ? t.id : null;
+          let taskType = t?.task_type || "Checkout Deep Clean";
+
           if (rm.status === "occupied") st = "occupied";
-          else if (rm.status === "vacant_dirty") st = "required";
-          else if (rm.status === "being_cleaned") st = "progress";
           else if (rm.status === "out_of_service") st = "maintenance";
+          else if (rm.status === "being_cleaned") st = "progress";
+          else if (rm.status === "vacant_dirty") st = "required";
           else if (rm.status === "reserved") st = "assigned";
-          return R(Number(rm.no), rm.type, st, "Checkout Cleaning", { by: ME });
+          else if (rm.status === "vacant_ready") st = "ready";
+
+          // If a task exists in housekeeping_tasks table, sync task status
+          if (t) {
+            if (t.priority === "high") prio = "High";
+            if (t.status === "in_progress") {
+              st = "progress";
+            } else if (t.status === "completed") {
+              if (rm.status === "vacant_ready" || rm.status === "ready") st = "ready";
+            } else if (t.status === "pending" || t.status === "assigned") {
+              if (rm.status === "being_cleaned") {
+                st = "progress";
+              } else {
+                st = "assigned";
+              }
+            }
+          }
+
+          const isCleaned = st === "ready" || st === "completed";
+          const inProg = st === "progress";
+
+          // Show only rooms checked out from frontdesk dashboard or with cleaning service request raised
+          const isCheckedOutFromFrontDesk = Boolean(
+            (rm.checkout_count && rm.checkout_count > 0) ||
+            rm.status === "vacant_dirty" ||
+            (t && t.task_type && t.task_type.toLowerCase().includes("checkout"))
+          );
+
+          const hasCleaningRequest = Boolean(
+            srRoomSet.has(String(rm.no)) ||
+            (rm.service_request_count && rm.service_request_count > 0) ||
+            (t && (t.task_type?.toLowerCase().includes("cleaning") || t.task_type?.toLowerCase().includes("clean")))
+          );
+
+          const isAssignedToHousekeeping = Boolean(isCheckedOutFromFrontDesk || hasCleaningRequest);
+
+          return {
+            id: Number(rm.no),
+            rt: rm.type,
+            status: st,
+            tt: taskType,
+            task_id: taskId,
+            prio,
+            g: "",
+            stay: isCheckedOutFromFrontDesk ? "Checked out" : rm.status === "occupied" ? "Staying" : rm.status === "reserved" ? "Reserved" : "Vacant",
+            inst: isCheckedOutFromFrontDesk ? "Checkout cleaning required" : hasCleaningRequest ? "Front Desk service request" : "",
+            by: isAssignedToHousekeeping ? ME : "Unassigned",
+            isAssignedToHousekeeping,
+            checked: isCleaned ? all13 : inProg ? [0, 1, 2, 3] : [],
+            issue: rm.status === "out_of_service" ? "Maintenance" : null,
+            created: t?.created_at ? String(t.created_at).slice(11, 16) : "07:30",
+            due: "12:00",
+          };
         });
         setRooms(mappedRooms);
       }
@@ -173,11 +259,39 @@ export default function HousekeepingDashboard({ onLogout, username }) {
         setSup(supRes.value.supplies.map((s) => ({ n: s.name, qty: s.qty, min: s.min_qty })));
       }
 
+      if (ratRes.status === "fulfilled" && ratRes.value?.success && ratRes.value.ratings?.length) {
+        setRatings(ratRes.value.ratings.map((rt) => ({
+          id: `R-${rt.id}`,
+          room: rt.room,
+          type: rt.type || "Room Cleaning",
+          staff: rt.staff || "Anita Joseph",
+          rating: rt.rating || 5,
+          comment: rt.comment || "Clean & ready.",
+          tags: rt.tags || ["Clean & Tidy"],
+          time: rt.time || String(rt.created_at || "").slice(11, 16) || "Recently",
+        })));
+      }
+
       if (srRes.status === "fulfilled" && srRes.value?.success && srRes.value.requests?.length) {
-        setReqs(srRes.value.requests.map((sr) => {
+        let statusMap = {};
+        try {
+          statusMap = JSON.parse(localStorage.getItem("veyra_sr_status_map") || "{}");
+        } catch (e) {}
+
+        const mappedReqs = srRes.value.requests.map((sr) => {
+          const norm = String(sr.status || "").trim().toLowerCase();
           let st = "New";
-          if (sr.status === "completed") st = "Completed";
-          else if (sr.status === "in_progress" || sr.status === "assigned" || sr.status === "accepted") st = "In Progress";
+          if (norm === "completed") st = "Completed";
+          else if (norm === "in_progress" || norm === "assigned" || norm === "accepted") st = "In Progress";
+
+          // Overlay persistent status cache to prevent any flipping
+          const cached = statusMap[`SR-${sr.id}`] || statusMap[String(sr.id)];
+          if (cached === "Completed") {
+            st = "Completed";
+          } else if (cached === "In Progress" && st !== "Completed") {
+            st = "In Progress";
+          }
+
           return {
             id: `SR-${sr.id}`,
             db_id: sr.id,
@@ -189,9 +303,14 @@ export default function HousekeepingDashboard({ onLogout, username }) {
             by: ME,
             status: st,
             time: sr.created_at ? String(sr.created_at).slice(11, 16) : clock(),
-            done: sr.status === "completed" ? "Done" : "",
+            done: st === "Completed" ? (sr.completed_at ? String(sr.completed_at).slice(11, 16) : "Done") : "",
           };
-        }));
+        });
+
+        setReqs(mappedReqs);
+        try {
+          localStorage.setItem("veyra_hk_service_requests", JSON.stringify(mappedReqs));
+        } catch (e) {}
       }
 
       if (cRes.status === "fulfilled" && cRes.value?.success && cRes.value.complaints?.length) {
@@ -226,19 +345,24 @@ export default function HousekeepingDashboard({ onLogout, username }) {
         })));
       }
 
-      if (nRes.status === "fulfilled" && nRes.value?.success && nRes.value.notifications?.length) {
-        const dbNotes = nRes.value.notifications.map((n) => ({
-          id: n.id,
-          type: n.title?.includes("Rating") ? "Rating" : n.title?.includes("Service") ? "Request" : "Room",
-          text: `${n.title}: ${n.message || ""}`,
-          time: String(n.created_at || "").slice(11, 16) || clock(),
-          read: n.is_read,
-        }));
-        setNotes((prev) => {
-          const ids = new Set(prev.map((x) => x.id));
-          const newEntries = dbNotes.filter((x) => !ids.has(x.id));
-          return [...newEntries, ...prev];
-        });
+      if (nRes.status === "fulfilled" && nRes.value?.success && nRes.value.notifications) {
+        let deletedSet = new Set();
+        try {
+          const deletedArr = JSON.parse(localStorage.getItem("veyra_hk_deleted_notifs") || "[]");
+          deletedSet = new Set(deletedArr);
+        } catch (e) {}
+
+        const dbNotes = nRes.value.notifications
+          .filter((n) => !deletedSet.has(n.id))
+          .map((n) => ({
+            id: n.id,
+            type: n.title?.includes("Rating") ? "Rating" : n.title?.includes("Service") ? "Request" : "Room",
+            text: `${n.title}: ${n.message || ""}`,
+            time: String(n.created_at || "").slice(11, 16) || clock(),
+            read: Boolean(n.is_read),
+          }));
+
+        setNotes(dbNotes);
       }
     } catch (err) {
       console.warn("Housekeeping fetch error:", err);
@@ -287,8 +411,15 @@ export default function HousekeepingDashboard({ onLogout, username }) {
       toast(`⭐ New Rating Received! Front Desk rated you ${data.rating}/5 stars for Room ${data.room}!`);
     };
 
+    const handleAnnouncement = (data) => {
+      if (!data) return;
+      notify("Urgent", `📢 Announcement from Admin: ${data.title} - ${data.message}`);
+      toast(`📢 Admin Announcement: ${data.title}`, "warn");
+    };
+
     const onSrCustom = (e) => handleNewSr(e.detail);
     const onRatingCustom = (e) => handleRating(e.detail);
+    const onAnnCustom = (e) => handleAnnouncement(e.detail);
     const onStorage = (e) => {
       if (e.key === "veyra_new_service_request" && e.newValue) {
         try { handleNewSr(JSON.parse(e.newValue)); } catch (err) {}
@@ -296,14 +427,19 @@ export default function HousekeepingDashboard({ onLogout, username }) {
       if (e.key === "veyra_hk_rating_feedback" && e.newValue) {
         try { handleRating(JSON.parse(e.newValue)); } catch (err) {}
       }
+      if (e.key === "veyra_announcement_broadcast" && e.newValue) {
+        try { handleAnnouncement(JSON.parse(e.newValue)); } catch (err) {}
+      }
     };
 
     window.addEventListener("veyra_service_request_created", onSrCustom);
     window.addEventListener("veyra_rating_submitted", onRatingCustom);
+    window.addEventListener("veyra_announcement_broadcast", onAnnCustom);
     window.addEventListener("storage", onStorage);
     return () => {
       window.removeEventListener("veyra_service_request_created", onSrCustom);
       window.removeEventListener("veyra_rating_submitted", onRatingCustom);
+      window.removeEventListener("veyra_announcement_broadcast", onAnnCustom);
       window.removeEventListener("storage", onStorage);
     };
   }, [refreshData]);
@@ -326,7 +462,7 @@ export default function HousekeepingDashboard({ onLogout, username }) {
   const hour = tick.getHours(), greet = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   const when = tick.toLocaleString("en-IN", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: !sys.h24 });
   const nowHM = tick.toTimeString().slice(0, 5);
-  const finished = (s) => ["completed", "inspection", "ready"].includes(s);
+  const finished = (s) => ["completed", "inspection", "ready", "available", "occupied"].includes(s);
   const overdue = (r) => r.due < nowHM && !finished(r.status) && r.status !== "maintenance";
 
   const start = async (r) => {
@@ -334,24 +470,23 @@ export default function HousekeepingDashboard({ onLogout, username }) {
     log(`Room ${r.id} cleaning started`);
     toast(`Room ${r.id}: cleaning started`);
     try {
-      await housekeepingApi.startTask(r.id);
+      await housekeepingApi.startTask(r.task_id || r.id);
+      await refreshData();
     } catch (err) {
       console.warn("Backend start task:", err);
     }
   };
 
   const chain = (id) => {
-    step(id, "completed", "inspection", 1800, () => log(`Room ${id} sent for inspection`));
-    step(id, "inspection", "ready", 8000, () => { log(`Room ${id} inspection completed`); notify("Room", `Room ${id} is clean and inspected`); });
+    step(id, "completed", "ready", 2500, () => { log(`Room ${id} inspection completed`); notify("Room", `Room ${id} is clean and inspected`); });
   };
 
   // Complete cleaning task & trigger rating popup at Front Desk
   const finish = async (r) => {
-    upd(r.id, { status: "completed", checked: all13 });
+    upd(r.id, { status: "ready", checked: all13 });
     setOpen(null);
-    log(`Room ${r.id} cleaned`);
+    log(`Room ${r.id} cleaned and marked ready`);
     toast(`Room ${r.id}: cleaning completed! Notifying Front Desk for rating...`);
-    chain(r.id);
 
     // Notify Front Desk in real-time
     const taskEvent = {
@@ -367,7 +502,7 @@ export default function HousekeepingDashboard({ onLogout, username }) {
     } catch (e) {}
 
     try {
-      await housekeepingApi.completeTask(r.id);
+      await housekeepingApi.completeTask(r.task_id || r.id);
       await refreshData();
     } catch (err) {
       console.warn("Backend complete task:", err);
@@ -398,31 +533,52 @@ export default function HousekeepingDashboard({ onLogout, username }) {
 
   // Advance Service Request: New -> In Progress -> Completed
   const advance = async (id) => {
-    let targetDbId = null;
-    let nextBackendStatus = "in_progress";
-    let completedReq = null;
+    // 1. Locate the item synchronously from current reqs state
+    const currentReq = reqs.find((item) => item.id === id || String(item.db_id) === String(id) || item.id === `SR-${id}`);
+    const targetDbId = currentReq?.db_id || parseInt(String(id).replace(/\D/g, ""), 10);
+    const isDone = currentReq ? (currentReq.status === "In Progress" || currentReq.status === "Accepted") : false;
+    const nextStatus = isDone ? "Completed" : "In Progress";
+    const nextBackendStatus = isDone ? "completed" : "in_progress";
+    const doneTime = isDone ? clock() : "";
 
-    setReqs((rs) => rs.map((r) => {
-      if (r.id !== id) return r;
-      targetDbId = r.db_id || parseInt(String(id).replace(/\D/g, ""), 10);
-      const isDone = r.status === "In Progress" || r.status === "Accepted";
-      const nx = isDone ? "Completed" : "In Progress";
-      nextBackendStatus = isDone ? "completed" : "in_progress";
-      if (isDone) {
-        completedReq = { ...r, status: "Completed", staff: me.name };
-        log(`Service request ${id} completed`);
-      } else {
-        log(`Service request ${id} accepted and in progress`);
+    // 2. Persist status in localStorage map immediately so it never reverts on poll/reload
+    try {
+      const statusMap = JSON.parse(localStorage.getItem("veyra_sr_status_map") || "{}");
+      statusMap[id] = nextStatus;
+      if (targetDbId) {
+        statusMap[`SR-${targetDbId}`] = nextStatus;
+        statusMap[String(targetDbId)] = nextStatus;
       }
-      return { ...r, status: nx, by: ME, done: isDone ? clock() : "" };
-    }));
+      localStorage.setItem("veyra_sr_status_map", JSON.stringify(statusMap));
+    } catch (e) {}
 
-    if (completedReq) {
-      toast(`Service request for Room ${completedReq.room} completed! Notifying Front Desk for rating...`);
+    // 3. Immediately update React state and cache
+    setReqs((prev) => {
+      const updated = prev.map((item) => {
+        if (item.id === id || (targetDbId && item.db_id === targetDbId) || (targetDbId && item.id === `SR-${targetDbId}`)) {
+          return {
+            ...item,
+            status: nextStatus,
+            by: ME,
+            done: doneTime,
+          };
+        }
+        return item;
+      });
+      try {
+        localStorage.setItem("veyra_hk_service_requests", JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+
+    // 4. Notifications & logs
+    if (isDone) {
+      log(`Service request ${id} completed`);
+      toast(`Service request for Room ${currentReq?.room || ""} completed! Notifying Front Desk for rating...`);
       const taskEvent = {
-        id: `SR-${completedReq.room}-${Date.now()}`,
-        room: completedReq.room,
-        type: completedReq.type,
+        id: `SR-${currentReq?.room || targetDbId}-${Date.now()}`,
+        room: currentReq?.room || "",
+        type: currentReq?.type || "Service Request",
         staff: me.name,
         ts: Date.now(),
       };
@@ -430,12 +586,14 @@ export default function HousekeepingDashboard({ onLogout, username }) {
         localStorage.setItem("veyra_hk_completed_event", JSON.stringify(taskEvent));
         window.dispatchEvent(new CustomEvent("veyra_task_completed", { detail: taskEvent }));
       } catch (e) {}
+    } else {
+      log(`Service request ${id} accepted and in progress`);
     }
 
+    // 5. Update backend database via REST API
     if (targetDbId) {
       try {
         await housekeepingApi.updateServiceRequest(targetDbId, nextBackendStatus);
-        // Dispatch so Front Desk chart updates automatically and synchronously
         window.dispatchEvent(new CustomEvent("veyra_service_request_status_updated", { detail: { id: targetDbId, status: nextBackendStatus } }));
         await refreshData();
       } catch (e) {
@@ -472,7 +630,44 @@ export default function HousekeepingDashboard({ onLogout, username }) {
   };
 
   const filt = (arr, f) => arr.filter((r) => f === "all" || (f === "urgent" ? r.prio === "High" && !finished(r.status) : f === "todo" ? ["assigned", "required", "maintenance"].includes(r.status) : f === "progress" ? r.status === "progress" : finished(r.status)));
-  const dismiss = (n) => setNotes(notes.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
+
+  const handleToggleRead = async (n) => {
+    const nextRead = !n.read;
+    setNotes((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: nextRead } : x)));
+    toast(nextRead ? "Notification marked as read" : "Notification marked as unread");
+    try {
+      await housekeepingApi.markNotificationRead(n.id, nextRead);
+    } catch (err) {
+      console.warn("Backend mark notification read error:", err);
+    }
+  };
+
+  const handleDeleteNotif = async (n) => {
+    setNotes((prev) => prev.filter((x) => x.id !== n.id));
+    try {
+      const deleted = JSON.parse(localStorage.getItem("veyra_hk_deleted_notifs") || "[]");
+      if (!deleted.includes(n.id)) {
+        deleted.push(n.id);
+        localStorage.setItem("veyra_hk_deleted_notifs", JSON.stringify(deleted));
+      }
+    } catch (e) {}
+    toast("Notification deleted");
+    try {
+      await housekeepingApi.deleteNotification(n.id);
+    } catch (err) {
+      console.warn("Backend delete notification error:", err);
+    }
+  };
+
+  const handleMarkAllRead = async () => {
+    setNotes((prev) => prev.map((x) => ({ ...x, read: true })));
+    toast("All notifications marked as read");
+    try {
+      await housekeepingApi.markAllNotificationsRead();
+    } catch (err) {
+      console.warn("Backend mark all read error:", err);
+    }
+  };
 
   return (
     <div className={`hk ${sys.compact ? "compact" : ""}`}>
@@ -578,12 +773,15 @@ export default function HousekeepingDashboard({ onLogout, username }) {
                         </p>
                       </div>
                       <button
-                        className={`hk-todo-btn ${sr.status === "In Progress" ? "btn-complete" : ""}`}
-                        onClick={() => advance(sr.id)}
+                        className={`hk-todo-btn ${sr.status === "In Progress" ? "btn-complete" : sr.status === "Completed" ? "btn-done" : ""}`}
+                        style={sr.status === "Completed" ? { background: "var(--green)", color: "#fff", border: "none" } : {}}
+                        onClick={() => sr.status === "Completed" ? null : advance(sr.id)}
+                        disabled={sr.status === "Completed"}
                       >
-                        {sr.status === "New" && "Accept Request"}
-                        {sr.status === "Accepted" && "Start Service"}
-                        {sr.status === "In Progress" && "Complete Service"}
+                        {sr.status === "New" && "Accept Task"}
+                        {sr.status === "Accepted" && "Complete Task"}
+                        {sr.status === "In Progress" && "Complete Task"}
+                        {sr.status === "Completed" && "✓ Task Done"}
                       </button>
                     </div>
                   ))}
@@ -604,14 +802,17 @@ export default function HousekeepingDashboard({ onLogout, username }) {
                         </p>
                       </div>
                       <button
-                        className="hk-todo-btn"
-                        onClick={() => {
-                          if (r.status === "assigned" || r.status === "required") start(r);
-                          go("rooms");
-                          setOpen(r.id);
+                        className={`hk-todo-btn ${r.status === "progress" ? "btn-complete" : r.status === "ready" ? "btn-done" : ""}`}
+                        style={r.status === "ready" ? { background: "var(--green)", color: "#fff", border: "none" } : {}}
+                        onClick={async () => {
+                          if (r.status === "assigned" || r.status === "required") {
+                            await start(r);
+                          } else if (r.status === "progress") {
+                            await finish(r);
+                          }
                         }}
                       >
-                        {r.status === "progress" ? "Continue (Open)" : "Start Cleaning"}
+                        {r.status === "progress" ? "Complete Task" : r.status === "ready" ? "✓ Task Done" : "Accept Task"}
                       </button>
                     </div>
                   ))}
@@ -848,10 +1049,10 @@ export default function HousekeepingDashboard({ onLogout, username }) {
 
                     {/* Card Actions Footer */}
                     <div className="hk-lux-card-foot">
-                      {r.status === "assigned" && (
+                      {(r.status === "assigned" || r.status === "required") && (
                         <button className="hk-lux-btn-main" onClick={() => start(r)}>
                           <Icon d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                          Start Cleaning
+                          Accept Task
                         </button>
                       )}
 
@@ -861,7 +1062,7 @@ export default function HousekeepingDashboard({ onLogout, username }) {
                           onClick={() => finish(r)}
                         >
                           <Icon d="M5 13l4 4L19 7" />
-                          {isFull ? "Complete Cleaning & Rate" : `Complete Cleaning (${13 - r.checked.length} left)`}
+                          Complete Task
                         </button>
                       )}
 
@@ -912,11 +1113,11 @@ export default function HousekeepingDashboard({ onLogout, username }) {
                     </div>
                     {r.status !== "Completed" && (r.by === ME || !r.by) ? (
                       <button className="btn" onClick={() => advance(r.id)}>
-                        {{ New: "Accept Request", Accepted: "Start Service", "In Progress": "Complete Service" }[r.status] || "Accept Request"}
+                        {{ New: "Accept Task", Accepted: "Complete Task", "In Progress": "Complete Task" }[r.status] || "Accept Task"}
                       </button>
                     ) : (
                       <span className="rq-end" style={{ color: "var(--ok)", fontWeight: 700 }}>
-                        ✓ {r.status === "Completed" ? "Done & Rated" : "Other staff"}
+                        ✓ {r.status === "Completed" ? "Task Done & Rated" : "Other staff"}
                       </span>
                     )}
                   </article>
@@ -1105,9 +1306,82 @@ export default function HousekeepingDashboard({ onLogout, username }) {
 
           {/* NOTIFICATIONS VIEW */}
           {view === "notifications" && (
-            <section className="panel"><div className="panel-h"><span className="muted">{unread} unread</span><button className="link" onClick={() => setNotes(notes.map((n) => ({ ...n, read: true })))}>Mark all read</button></div>
+            <section className="panel">
+              <div className="panel-h">
+                <span className="muted">{unread} unread</span>
+                {visNotes.length > 0 && (
+                  <button className="link" onClick={handleMarkAllRead}>
+                    Mark all read
+                  </button>
+                )}
+              </div>
               {visNotes.length === 0 && <p className="empty">No notifications.</p>}
-              <ul className="lines">{visNotes.map((n) => <li key={n.id} className={n.read ? "" : "unread"} onClick={() => dismiss(n)}><span><span className="tag tag-plain">{n.type}</span> {n.text}</span><small className="muted">{n.time}</small></li>)}</ul></section>
+              <ul className="lines">
+                {visNotes.map((n) => (
+                  <li
+                    key={n.id}
+                    className={n.read ? "" : "unread"}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 14,
+                      padding: "12px 14px",
+                      borderRadius: 10,
+                      background: n.read ? "#fff" : "var(--tealsoft)",
+                      border: "1px solid var(--line)",
+                      marginBottom: 8,
+                    }}
+                  >
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span className="tag tag-plain" style={{ textTransform: "capitalize" }}>{n.type}</span>
+                        <span style={{ fontSize: "0.92rem", color: "var(--navy)", fontWeight: n.read ? 500 : 700, wordBreak: "break-word" }}>
+                          {n.text}
+                        </span>
+                      </div>
+                      <small className="muted" style={{ fontSize: "0.8rem" }}>{n.time}</small>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                      <button
+                        type="button"
+                        className="btn-sm"
+                        onClick={(e) => { e.stopPropagation(); handleToggleRead(n); }}
+                        style={{
+                          background: n.read ? "#f4f2ee" : "var(--teal)",
+                          color: n.read ? "var(--muted)" : "#fff",
+                          border: "1px solid var(--line)",
+                          padding: "6px 12px",
+                          borderRadius: 8,
+                          fontSize: "0.8rem",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {n.read ? "Mark Unread" : "Mark Read"}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-sm"
+                        onClick={(e) => { e.stopPropagation(); handleDeleteNotif(n); }}
+                        style={{
+                          background: "#fef2f2",
+                          color: "#dc2626",
+                          border: "1px solid #fecaca",
+                          padding: "6px 12px",
+                          borderRadius: 8,
+                          fontSize: "0.8rem",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
 
           {/* PROFILE VIEW */}

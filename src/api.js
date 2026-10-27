@@ -55,6 +55,10 @@ export const adminApi = {
   updatePricing: (data) => apiRequest('/admin/pricing', 'PUT', data),
   getActivity: (params = '') => apiRequest(`/admin/activity${params}`),
   getOperations: () => apiRequest('/admin/operations'),
+  getLeaves: () => apiRequest('/admin/leaves'),
+  updateLeave: (id, status) => apiRequest(`/admin/leaves/${id}`, 'PUT', { status }),
+  sendAnnouncement: (data) => apiRequest('/admin/announcements', 'POST', data),
+  getNotifications: () => apiRequest('/admin/notifications'),
 };
 
 // Front Desk API
@@ -65,7 +69,9 @@ export const frontdeskApi = {
   getBookings: () => apiRequest('/frontdesk/bookings'),
   createBooking: (data) => apiRequest('/frontdesk/bookings', 'POST', data),
   checkin: (id) => apiRequest(`/frontdesk/checkin/${id}`, 'POST'),
-  checkout: (id) => apiRequest(`/frontdesk/checkout/${id}`, 'POST'),
+  checkout: (id, data = {}) => apiRequest(`/frontdesk/checkout/${id}`, 'POST', data),
+  postCharge: (id, data) => apiRequest(`/frontdesk/bookings/${id}/charges`, 'POST', data),
+  postPayment: (id, data) => apiRequest(`/frontdesk/bookings/${id}/payments`, 'POST', data),
   getInHouse: () => apiRequest('/frontdesk/inhouse'),
   getServiceRequests: () => apiRequest('/frontdesk/service-requests'),
   createServiceRequest: (data) => apiRequest('/frontdesk/service-requests', 'POST', data),
@@ -108,8 +114,11 @@ export const housekeepingApi = {
   applyLeave: (data) => apiRequest('/housekeeping/leave', 'POST', data),
   cancelLeave: (id) => apiRequest(`/housekeeping/leave/${id}`, 'DELETE'),
   toggleDuty: () => apiRequest('/housekeeping/duty', 'PATCH'),
+  getRatings: () => apiRequest('/housekeeping/ratings'),
   getNotifications: () => apiRequest('/housekeeping/notifications'),
-  markNotificationRead: (id) => apiRequest(`/housekeeping/notifications/${id}/read`, 'PATCH'),
+  markNotificationRead: (id, isRead = true) => apiRequest(`/housekeeping/notifications/${id}/read`, 'PATCH', { is_read: isRead ? 1 : 0 }),
+  markAllNotificationsRead: () => apiRequest('/housekeeping/notifications/mark-all-read', 'POST'),
+  deleteNotification: (id) => apiRequest(`/housekeeping/notifications/${id}`, 'DELETE'),
 };
 
 // Billing API
@@ -127,6 +136,7 @@ export const billingApi = {
   updateRefundStatus: (id, status) => apiRequest(`/billing/refunds/${id}/status`, 'PUT', { status }),
   getRevenue: () => apiRequest('/billing/revenue'),
   getGuests: () => apiRequest('/billing/guests'),
+  getGuestAccount: (id) => apiRequest(`/billing/guests/${id}`),
   getActivity: () => apiRequest('/billing/activity'),
   getNotifications: () => apiRequest('/billing/notifications'),
   markNotificationRead: (id) => apiRequest(`/billing/notifications/${id}/read`, 'PATCH'),

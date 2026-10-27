@@ -27,7 +27,7 @@ const RATES = { Single: 2500, Double: 3800, Deluxe: 5200, Suite: 9000 };
 const CAP = { Single: 2, Double: 3, Deluxe: 3, Suite: 5 }; // max guests per room type
 const MEALS = { "No meals": 0, Breakfast: 400, "Half board": 900 }; // per guest per night
 const PAY_MODES = ["Cash", "UPI", "Card", "Bank transfer"];
-const CHARGE_CATS = ["Restaurant", "Room service", "Minibar", "Laundry", "Spa", "Taxi", "Other"];
+const CHARGE_CATS = ["Damage Charges", "Room Damage / Fine", "Minibar Consumed", "Late Checkout Fee", "Restaurant", "Room service", "Laundry", "Spa", "Taxi", "Other"];
 const MOVE_REASONS = ["Guest request", "Maintenance issue", "Upgrade", "Noise complaint"];
 const GST = 1.12;
 const ACTIVE = ["Pending", "Confirmed", "Checked-In"];
@@ -517,50 +517,140 @@ function CheckInModal({ booking, rooms, candidates, onClose, onConfirm }) {
   );
 }
 
-/* Check-out: charges summary, key return, room inspection, payment mode */
+/* Check-out: charges summary, extra incidentals, damage charges, key return, room inspection, payment mode */
 function CheckOutModal({ booking, onClose, onConfirm }) {
-  const balance = dueOf(booking);
+  const [damages, setDamages] = useState("");
+  const [damageDesc, setDamageDesc] = useState("");
+  const [extras, setExtras] = useState("");
+  const [extraDesc, setExtraDesc] = useState("");
   const [key, setKey] = useState(false);
   const [inspect, setInspect] = useState(false);
   const [settled, setSettled] = useState(false);
   const [mode, setMode] = useState(PAY_MODES[0]);
-  const ready = key && inspect && (balance === 0 || settled);
+
+  const baseDue = dueOf(booking);
+  const damageAmt = Math.max(0, Number(damages) || 0);
+  const extraAmt = Math.max(0, Number(extras) || 0);
+  const totalDue = Math.max(0, baseDue + damageAmt + extraAmt);
+
+  const ready = key && inspect && (totalDue === 0 || settled);
+
   return (
-    <Modal onClose={onClose} width={480}>
+    <Modal onClose={onClose} width={520}>
       <div className="fd-modal-inner">
-        <ModalTitle title={`Check out ${booking.name}`} sub={`Room ${booking.room} - ${displayDate(booking.checkIn)} to ${displayDate(booking.checkOut)}`} onClose={onClose} />
+        <ModalTitle
+          title={`Check out ${booking.name}`}
+          sub={`Room ${booking.room} · ${displayDate(booking.checkIn)} to ${displayDate(booking.checkOut)}`}
+          onClose={onClose}
+        />
+
         <table className="fd-table" style={{ marginBottom: 12 }}>
           <tbody>
-            <tr><td>Stay charges (incl. GST)</td><td>{money(booking.total)}</td></tr>
-            <tr><td>Extra charges ({(booking.charges || []).length})</td><td>{money(chargesSum(booking))}</td></tr>
-            <tr><td>Paid so far</td><td>{money(booking.paid)}</td></tr>
-            <tr><td><b>Balance due</b></td><td><b style={{ color: balance ? "var(--red)" : "var(--green)" }}>{money(balance)}</b></td></tr>
+            <tr><td>Room Stay & Meals (incl. GST)</td><td>{money(booking.total)}</td></tr>
+            <tr><td>Prior Extra Charges ({(booking.charges || []).length})</td><td>{money(chargesSum(booking))}</td></tr>
+            <tr><td>Paid so far</td><td style={{ color: "var(--navy-d)", fontWeight: 600 }}>{money(booking.paid)}</td></tr>
+            <tr><td>Rest Room Price to Pay (Base Balance)</td><td><b>{money(baseDue)}</b></td></tr>
+            {damageAmt > 0 && (
+              <tr style={{ color: "var(--red)" }}>
+                <td>+ Damage Charges / Fine ({damageDesc || "Damage"})</td>
+                <td><b>+{money(damageAmt)}</b></td>
+              </tr>
+            )}
+            {extraAmt > 0 && (
+              <tr style={{ color: "var(--gold-d)" }}>
+                <td>+ Additional Extras ({extraDesc || "Incidentals"})</td>
+                <td><b>+{money(extraAmt)}</b></td>
+              </tr>
+            )}
+            <tr style={{ background: "rgba(212,175,55,0.1)", fontSize: "1.05rem" }}>
+              <td><b>Total Final Settlement Amount Due</b></td>
+              <td><b style={{ color: totalDue > 0 ? "var(--red)" : "var(--green)" }}>{money(totalDue)}</b></td>
+            </tr>
           </tbody>
         </table>
-        <label style={{ ...S.row, marginBottom: 8, fontSize: 13 }}><input type="checkbox" checked={key} onChange={(e) => setKey(e.target.checked)} /> Key card returned</label>
-        <label style={{ ...S.row, marginBottom: 8, fontSize: 13 }}><input type="checkbox" checked={inspect} onChange={(e) => setInspect(e.target.checked)} /> Minibar and room damage checked</label>
-        {balance > 0 && (
-          <>
-            <div style={{ ...S.row, marginBottom: 10 }}>
-              <span style={{ fontSize: 13 }}>Payment mode</span>
+
+        {/* Section to add damage fees and extra incidentals */}
+        <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "12px 14px", marginBottom: 12 }}>
+          <div style={{ fontWeight: 600, fontSize: "0.88rem", color: "var(--navy-d)", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+            <span>⚠️</span> Add Extra Incidentals & Room Damage Fees
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 115px", gap: 8, marginBottom: 8 }}>
+            <input
+              className="fd-input"
+              placeholder="Damage description (e.g. Broken lamp, stained bedsheet)"
+              value={damageDesc}
+              onChange={(e) => setDamageDesc(e.target.value)}
+            />
+            <input
+              className="fd-input"
+              type="number"
+              min="0"
+              placeholder="Damage Rs"
+              value={damages}
+              onChange={(e) => setDamages(e.target.value)}
+            />
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 115px", gap: 8 }}>
+            <input
+              className="fd-input"
+              placeholder="Extra description (e.g. Minibar, Late checkout fee)"
+              value={extraDesc}
+              onChange={(e) => setExtraDesc(e.target.value)}
+            />
+            <input
+              className="fd-input"
+              type="number"
+              min="0"
+              placeholder="Extra Rs"
+              value={extras}
+              onChange={(e) => setExtras(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <label style={{ ...S.row, marginBottom: 8, fontSize: 13, cursor: "pointer" }}>
+          <input type="checkbox" checked={key} onChange={(e) => setKey(e.target.checked)} /> Key card returned
+        </label>
+        <label style={{ ...S.row, marginBottom: 8, fontSize: 13, cursor: "pointer" }}>
+          <input type="checkbox" checked={inspect} onChange={(e) => setInspect(e.target.checked)} /> Minibar & room damage checked
+        </label>
+
+        {totalDue > 0 && (
+          <div style={{ background: "#fff", border: "1px dashed var(--line)", borderRadius: 8, padding: 10, margin: "10px 0" }}>
+            <div style={{ ...S.row, marginBottom: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>Payment Method</span>
               <select className="fd-select" style={{ width: 160 }} value={mode} onChange={(e) => setMode(e.target.value)}>
                 {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
               </select>
             </div>
-            <label style={{ ...S.row, marginBottom: 12, fontSize: 13 }}>
-              <input type="checkbox" checked={settled} onChange={(e) => setSettled(e.target.checked)} /> I received {money(balance)} from the guest
+            <label style={{ ...S.row, fontSize: 13, cursor: "pointer" }}>
+              <input type="checkbox" checked={settled} onChange={(e) => setSettled(e.target.checked)} />
+              <span>I received <b>{money(totalDue)}</b> (Rest price + extras/damages) from guest</span>
             </label>
-          </>
+            {!settled && (
+              <small style={{ color: "var(--charcoal-soft)", display: "block", marginTop: 4 }}>
+                * If unchecked, unpaid balance of {money(totalDue)} will be forwarded to Billing as an outstanding invoice.
+              </small>
+            )}
+          </div>
         )}
-        <button className="fd-submit-btn" disabled={!ready} style={{ opacity: ready ? 1 : 0.5 }} onClick={() => onConfirm(booking, settled, mode)}>
-          <Icon name="check" size={16} color="#fff" /> Complete check-out
+
+        <button
+          className="fd-submit-btn"
+          disabled={!ready}
+          style={{ opacity: ready ? 1 : 0.5, marginTop: 8 }}
+          onClick={() => onConfirm(booking, settled, mode, { damageAmt, damageDesc, extraAmt, extraDesc, totalDue })}
+        >
+          <Icon name="check" size={16} color="#fff" /> Complete check-out & Settle
         </button>
       </div>
     </Modal>
   );
 }
 
-/* Guest folio: post charges, take payments, download invoice */
+/* Guest folio: post charges (including post-checkout damages), take payments, download invoice */
 function FolioModal({ booking, onClose, onCharge, onPay, onInvoice, canCharge, canPay }) {
   const [ch, setCh] = useState({ cat: CHARGE_CATS[0], desc: "", amount: "" });
   const [pay, setPay] = useState({ mode: PAY_MODES[0], amount: "" });
@@ -568,57 +658,93 @@ function FolioModal({ booking, onClose, onCharge, onPay, onInvoice, canCharge, c
   const chAmt = Number(ch.amount) || 0;
   const payAmt = Number(pay.amount) || 0;
   const closed = booking.status === "Checked-Out";
+
   return (
-    <Modal onClose={onClose} width={580}>
+    <Modal onClose={onClose} width={600}>
       <div className="fd-modal-inner">
-        <ModalTitle title={`Folio - ${booking.name}`} sub={`${booking.id} - Room ${booking.room || "unassigned"} - ${displayDate(booking.checkIn)} to ${displayDate(booking.checkOut)}`} onClose={onClose} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+          <ModalTitle
+            title={`Folio - ${booking.name}`}
+            sub={`${booking.id} · Room ${booking.room || "unassigned"} · ${displayDate(booking.checkIn)} to ${displayDate(booking.checkOut)}`}
+            onClose={onClose}
+          />
+        </div>
+
+        {closed && (
+          <div style={{ background: "#fffbeb", border: "1px solid #fef3c7", borderRadius: 8, padding: "8px 12px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8, fontSize: "0.84rem", color: "#92400e" }}>
+            <span>ℹ️</span>
+            <b>Guest Departed:</b> You can add post-checkout damage charges, incidentals, or record rest payments below. All updates sync to Billing.
+          </div>
+        )}
+
         <table className="fd-table" style={{ marginBottom: 12 }}>
           <tbody>
             <tr><td>Room and meals (incl. GST)</td><td>{money(booking.total)}</td></tr>
             {(booking.charges || []).map((c) => (
-              <tr key={c.id}><td>{c.cat}{c.desc ? ` - ${c.desc}` : ""} <span style={S.muted}>{ago(c.ts)}</span></td><td>{money(c.amount)}</td></tr>
+              <tr key={c.id}>
+                <td>
+                  <b style={{ color: c.cat?.includes("Damage") ? "var(--red)" : "inherit" }}>{c.cat}</b>
+                  {c.desc ? ` - ${c.desc}` : ""} <span style={S.muted}>{ago(c.ts)}</span>
+                </td>
+                <td style={{ fontWeight: 600, color: c.cat?.includes("Damage") ? "var(--red)" : "inherit" }}>{money(c.amount)}</td>
+              </tr>
             ))}
             <tr><td><b>Grand total</b></td><td><b>{money(grandOf(booking))}</b></td></tr>
-            <tr><td>Paid</td><td>{money(booking.paid)}</td></tr>
-            <tr><td><b>Balance due</b></td><td><b style={{ color: due ? "var(--red)" : "var(--green)" }}>{money(due)}</b></td></tr>
+            <tr><td>Paid so far</td><td style={{ color: "var(--green)", fontWeight: 600 }}>{money(booking.paid)}</td></tr>
+            <tr><td><b>Remaining Rest Price Due</b></td><td><b style={{ color: due ? "var(--red)" : "var(--green)" }}>{money(due)}</b></td></tr>
           </tbody>
         </table>
 
         {(booking.payments || []).length > 0 && (
-          <div style={{ ...S.muted, marginBottom: 10 }}>
-            Payments: {(booking.payments || []).map((p) => `${money(p.amount)} ${p.mode}`).join(", ")}
+          <div style={{ ...S.muted, marginBottom: 10, fontSize: "0.82rem" }}>
+            Payments: {(booking.payments || []).map((p) => `${money(p.amount)} (${p.mode})`).join(", ")}
           </div>
         )}
 
-        {canCharge && !closed && (
+        {/* Post a charge (Damages or extras) - ENABLED EVEN AFTER CHECKOUT */}
+        {canCharge && (
           <div style={S.fieldGap}>
-            <div className="fd-label" style={{ marginBottom: 6 }}>Post a charge</div>
+            <div className="fd-label" style={{ marginBottom: 6, display: "flex", justifyContent: "space-between" }}>
+              <span>{closed ? "Post Additional Charges / Damages" : "Post a charge"}</span>
+              <small style={{ color: "var(--charcoal-soft)" }}>Select 'Damage Charges' if property was damaged</small>
+            </div>
             <div style={S.row}>
-              <select className="fd-select" style={{ width: 140 }} value={ch.cat} onChange={(e) => setCh({ ...ch, cat: e.target.value })}>
+              <select className="fd-select" style={{ width: 170 }} value={ch.cat} onChange={(e) => setCh({ ...ch, cat: e.target.value })}>
                 {CHARGE_CATS.map((c) => <option key={c}>{c}</option>)}
               </select>
-              <input className="fd-input" style={{ flex: 1, minWidth: 120 }} placeholder="Details (optional)" value={ch.desc} onChange={(e) => setCh({ ...ch, desc: e.target.value })} />
+              <input className="fd-input" style={{ flex: 1, minWidth: 120 }} placeholder="Details (e.g. Broken TV remote, stained bedsheet)" value={ch.desc} onChange={(e) => setCh({ ...ch, desc: e.target.value })} />
               <input className="fd-input" style={{ width: 100 }} type="number" min="1" placeholder="Rs" value={ch.amount} onChange={(e) => setCh({ ...ch, amount: e.target.value })} />
-              <button className="fd-btn-solid" disabled={chAmt <= 0} style={{ opacity: chAmt > 0 ? 1 : 0.5 }} onClick={() => { onCharge(booking.id, { cat: ch.cat, desc: ch.desc.trim(), amount: chAmt }); setCh({ ...ch, desc: "", amount: "" }); }}><Icon name="plus" size={14} /> Post</button>
+              <button
+                className="fd-btn-solid"
+                disabled={chAmt <= 0}
+                style={{ opacity: chAmt > 0 ? 1 : 0.5 }}
+                onClick={() => {
+                  onCharge(booking.id, { cat: ch.cat, desc: ch.desc.trim(), amount: chAmt });
+                  setCh({ ...ch, desc: "", amount: "" });
+                }}
+              >
+                <Icon name="plus" size={14} /> Post
+              </button>
             </div>
           </div>
         )}
 
-        {canPay && !closed && due > 0 && (
+        {/* Receive payment - ENABLED EVEN AFTER CHECKOUT WHEN DUE > 0 */}
+        {canPay && due > 0 && (
           <div style={S.fieldGap}>
-            <div className="fd-label" style={{ marginBottom: 6 }}>Receive payment</div>
+            <div className="fd-label" style={{ marginBottom: 6 }}>Receive payment / Settle rest balance</div>
             <div style={S.row}>
               <select className="fd-select" style={{ width: 150 }} value={pay.mode} onChange={(e) => setPay({ ...pay, mode: e.target.value })}>
                 {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
               </select>
               <input className="fd-input" style={{ width: 120 }} type="number" min="1" max={due} placeholder="Rs" value={pay.amount} onChange={(e) => setPay({ ...pay, amount: e.target.value })} />
-              <button className="fd-action-link" onClick={() => setPay({ ...pay, amount: String(due) })}><Icon name="receipt" size={13} /> Full due</button>
+              <button className="fd-action-link" onClick={() => setPay({ ...pay, amount: String(due) })}><Icon name="receipt" size={13} /> Full rest due</button>
               <button className="fd-btn-solid" disabled={payAmt <= 0 || payAmt > due} style={{ opacity: payAmt > 0 && payAmt <= due ? 1 : 0.5 }} onClick={() => { onPay(booking.id, { mode: pay.mode, amount: payAmt }); setPay({ ...pay, amount: "" }); }}><Icon name="check" size={14} /> Record</button>
             </div>
           </div>
         )}
 
-        <div style={S.row}>
+        <div style={{ ...S.row, marginTop: 14 }}>
           <button className="fd-btn-outline" onClick={() => onInvoice(booking)}><Icon name="download" size={14} color="var(--navy)" /> Download invoice</button>
           <button className="fd-btn-outline" onClick={() => window.print()}><Icon name="print" size={14} color="var(--navy)" /> Print</button>
         </div>
@@ -917,18 +1043,32 @@ export default function FrontDashboard({ onLogout, username }) {
     };
 
     const handleCustomEvent = (e) => checkCompletedHk(e.detail);
+    const handleAnnCustom = (e) => {
+      if (!e.detail) return;
+      pushNotif(`📢 Admin Announcement: ${e.detail.title} - ${e.detail.message}`, "Urgent", "admin", "announcements");
+      showToast(`📢 Admin Announcement: ${e.detail.title}`);
+    };
     const handleStorage = (e) => {
       if (e.key === "veyra_hk_completed_event" && e.newValue) {
         try {
           checkCompletedHk(JSON.parse(e.newValue));
         } catch (err) {}
       }
+      if (e.key === "veyra_announcement_broadcast" && e.newValue) {
+        try {
+          const ann = JSON.parse(e.newValue);
+          pushNotif(`📢 Admin Announcement: ${ann.title} - ${ann.message}`, "Urgent", "admin", "announcements");
+          showToast(`📢 Admin Announcement: ${ann.title}`);
+        } catch (err) {}
+      }
     };
 
     window.addEventListener("veyra_task_completed", handleCustomEvent);
+    window.addEventListener("veyra_announcement_broadcast", handleAnnCustom);
     window.addEventListener("storage", handleStorage);
     return () => {
       window.removeEventListener("veyra_task_completed", handleCustomEvent);
+      window.removeEventListener("veyra_announcement_broadcast", handleAnnCustom);
       window.removeEventListener("storage", handleStorage);
     };
   }, []);
@@ -1157,23 +1297,82 @@ export default function FrontDashboard({ onLogout, username }) {
     setPassBooking(updated);
   }
 
-  function handleCheckOutConfirm(b, settled, mode) {
-    const due = dueOf(b);
+  function handleCheckOutConfirm(b, settled, mode, extraData = {}) {
+    const { damageAmt = 0, damageDesc = "", extraAmt = 0, extraDesc = "", totalDue = dueOf(b) } = extraData;
+
+    const newCharges = [];
+    if (damageAmt > 0) {
+      newCharges.push({
+        id: uid(),
+        ts: Date.now(),
+        cat: "Damage Charges",
+        desc: damageDesc || "Room damages / repair",
+        amount: damageAmt,
+      });
+    }
+    if (extraAmt > 0) {
+      newCharges.push({
+        id: uid(),
+        ts: Date.now(),
+        cat: "Extra Incidentals",
+        desc: extraDesc || "Extra services & incidentals",
+        amount: extraAmt,
+      });
+    }
+
+    const allCharges = [...(b.charges || []), ...newCharges];
+    const newGrandTotal = b.total + allCharges.reduce((acc, c) => acc + (Number(c.amount) || 0), 0);
+    const newPaid = settled ? newGrandTotal : b.paid;
+    const newPayments = settled && totalDue > 0
+      ? [...(b.payments || []), { id: uid(), ts: Date.now(), mode, amount: totalDue }]
+      : b.payments || [];
+
     setBookings((p) => p.map((x) => (x.id === b.id ? {
-      ...x, status: "Checked-Out",
-      paid: settled ? grandOf(x) : x.paid,
-      payments: settled && due > 0 ? [...(x.payments || []), { id: uid(), ts: Date.now(), mode, amount: due }] : x.payments || [],
+      ...x,
+      status: "Checked-Out",
+      charges: allCharges,
+      paid: newPaid,
+      payments: newPayments,
     } : x)));
-    if (b.room) setRooms((p) => p.map((r) => (r.number === b.room ? { number: r.number, floor: r.floor, type: r.type, status: "cleaning", hk: "dirty" } : r)));
-    log("checkout", `Checked out ${b.name} from Room ${b.room}`, b.id, settled ? due : 0);
+
+    if (b.room) {
+      setRooms((p) => p.map((r) => (r.number === b.room ? { number: r.number, floor: r.floor, type: r.type, status: "cleaning", hk: "dirty" } : r)));
+    }
+
+    log("checkout", `Checked out ${b.name} from Room ${b.room}${damageAmt > 0 ? ` (Damage: ${money(damageAmt)})` : ""}${extraAmt > 0 ? ` (Extra: ${money(extraAmt)})` : ""}`, b.id, settled ? totalDue : 0);
     pushNotif(`Room ${b.room} needs cleaning - ${b.name} checked out.`, "Info", "rooms", "rooms");
+
     try {
-      frontdeskApi.checkout(b.booking_room_id || b.db_id || b.id).then(() => refreshData()).catch((e) => console.warn("Backend checkout error:", e));
+      frontdeskApi.checkout(b.booking_room_id || b.db_id || b.id, {
+        damages: damageAmt,
+        damage_desc: damageDesc,
+        extra_charges: extraAmt,
+        extra_desc: extraDesc,
+        settled,
+        payment_method: mode,
+      }).then(() => refreshData()).catch((e) => console.warn("Backend checkout error:", e));
     } catch (e) {
       console.warn("Backend checkout error:", e);
     }
+
+    // Broadcast event to Billing Dashboard so Billing updates immediately
+    try {
+      const billingPayload = {
+        bookingId: b.id,
+        guestName: b.name,
+        room: b.room,
+        damageAmount: damageAmt,
+        extraAmount: extraAmt,
+        totalDue,
+        settled,
+        timestamp: Date.now(),
+      };
+      localStorage.setItem("veyra_checkout_settlement", JSON.stringify(billingPayload));
+      window.dispatchEvent(new CustomEvent("veyra_checkout_settlement", { detail: billingPayload }));
+    } catch (e) {}
+
     setCheckOutBooking(null);
-    showToast(`${b.name} checked out. Room ${b.room} sent to housekeeping.`);
+    showToast(`${b.name} checked out.${damageAmt > 0 ? ` Damage charges of ${money(damageAmt)} recorded.` : ""} Room ${b.room} sent to housekeeping.`);
   }
 
   function handleRoomMove(b, newRoom, reason) {
@@ -1195,12 +1394,40 @@ export default function FrontDashboard({ onLogout, username }) {
     setBookings((p) => p.map((x) => (x.id === id ? { ...x, charges: [...(x.charges || []), { id: uid(), ts: Date.now(), ...ch }] } : x)));
     log("folio", `Posted ${ch.cat} charge ${money(ch.amount)} to Room ${b ? b.room : ""}`, id);
     showToast(`${money(ch.amount)} ${ch.cat.toLowerCase()} charge posted.`);
+
+    const targetId = b?.db_id || b?.booking_room_id || id;
+    if (targetId) {
+      frontdeskApi.postCharge(targetId, {
+        cat: ch.cat,
+        desc: ch.desc,
+        amount: ch.amount,
+      }).then(() => refreshData()).catch((e) => console.warn("Backend post charge error:", e));
+    }
+
+    try {
+      localStorage.setItem("veyra_new_charge_posted", JSON.stringify({ bookingId: id, charge: ch, ts: Date.now() }));
+      window.dispatchEvent(new CustomEvent("veyra_new_charge_posted", { detail: { bookingId: id, charge: ch } }));
+    } catch (e) {}
   }
+
   function addPayment(id, pay) {
     const b = bookings.find((x) => x.id === id);
     setBookings((p) => p.map((x) => (x.id === id ? { ...x, paid: x.paid + pay.amount, payments: [...(x.payments || []), { id: uid(), ts: Date.now(), ...pay }] } : x)));
     log("payment", `Received ${money(pay.amount)} (${pay.mode}) from ${b ? b.name : "guest"}`, id, pay.amount);
     showToast(`${money(pay.amount)} received by ${pay.mode}.`);
+
+    const targetId = b?.db_id || b?.booking_room_id || id;
+    if (targetId) {
+      frontdeskApi.postPayment(targetId, {
+        mode: pay.mode,
+        amount: pay.amount,
+      }).then(() => refreshData()).catch((e) => console.warn("Backend post payment error:", e));
+    }
+
+    try {
+      localStorage.setItem("veyra_payment_received", JSON.stringify({ bookingId: id, payment: pay, ts: Date.now() }));
+      window.dispatchEvent(new CustomEvent("veyra_payment_received", { detail: { bookingId: id, payment: pay } }));
+    } catch (e) {}
   }
 
   function releaseRoom(b) {
@@ -1540,7 +1767,19 @@ Generated ${new Date().toLocaleString("en-IN")} by ${USER}`, "text/plain", `Invo
                       <td>{billChip(b)}</td>
                       <td>
                         <div style={S.row}>
-                          {b.status === "Checked-Out" && <span style={S.chip("var(--grey)")}>Departed</span>}
+                          {b.status === "Checked-Out" && (
+                            <>
+                              <span style={S.chip("var(--grey)")}>Departed</span>
+                              <button
+                                className="fd-action-link"
+                                style={{ color: "var(--red)", fontWeight: 600 }}
+                                onClick={() => setFolioId(b.id)}
+                                title="Add damage charges, rest price, or settle balance"
+                              >
+                                <Icon name="receipt" size={13} /> + Damages / Extras
+                              </button>
+                            </>
+                          )}
                           {b.status === "Checked-In" && isToday && <button className="fd-btn-checkout" onClick={() => setCheckOutBooking(b)}><Icon name="logout" size={13} /> Check out</button>}
                           {b.status === "Checked-In" && isToday && <button className="fd-action-link" onClick={() => extendStay(b)}><Icon name="calendarPlus" size={13} /> Extend</button>}
                           {b.status === "Checked-In" && isToday && !b.lateCheckout && <button className="fd-action-link" onClick={() => requestLateCheckout(b)}><Icon name="clock" size={13} /> Late C/O</button>}
@@ -2254,6 +2493,20 @@ Generated ${new Date().toLocaleString("en-IN")} by ${USER}`, "text/plain", `Invo
                               </div>
 
                               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <button
+                                  onClick={async () => {
+                                    if (!window.confirm("Remove this service request?")) return;
+                                    try {
+                                      await frontdeskApi.deleteServiceRequest(r.db_id || r.id);
+                                    } catch (e) {}
+                                    setRequests((p) => p.filter((x) => x.id !== r.id));
+                                    showToast("Service request removed.");
+                                  }}
+                                  style={{ background: "none", border: "1.5px solid #e5e0d5", borderRadius: 8, padding: "5px 8px", cursor: "pointer", color: "#9b1c1c", display: "flex", alignItems: "center" }}
+                                  title="Remove request"
+                                >
+                                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                                </button>
                                 {!isDone && !isProg && (
                                   <span style={{ fontSize: 12, color: "var(--blue)", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "var(--blue-bg)", borderRadius: 6 }}>
                                     <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--blue)" }} /> Assigned to Housekeeping
